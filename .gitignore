@@ -1,0 +1,6 @@
+Orbit.xcodeproj/
+DerivedData/
+build/
+*.ipa
+.DS_Store
+xcuserdata/
