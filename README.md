@@ -37,6 +37,8 @@ The first time, iOS asks you to trust the developer certificate under *Settings 
 
 That is the whole setup. The QR carries the address, fallback addresses and a pairing token; the app tries the alternatives by itself and keeps learning new ones from the Mac, so you scan once. **Rotate token** on the Mac unpairs every device at once.
 
+If you are building your own phone app for a service on your Mac, the Tailscale path — Serve, HTTPS, the loopback-trust pitfall, ATS — is written up in the main repo's [tailnet playbook](https://github.com/Micropeptide/Orbit/blob/main/docs/tailnet-playbook.md).
+
 ## What it deliberately does not do
 
 - It never stores a conversation the Mac has not accepted. The offline copy is for reading; the Mac is the only database.
