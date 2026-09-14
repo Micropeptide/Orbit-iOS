@@ -474,8 +474,17 @@ final class AppState: ObservableObject {
         liveStatus = "picking up an answer already running"
         pollTask?.cancel()
         pollTask = Task {
+            var step: Int? = nil
             while !Task.isCancelled, liveSid == sid {
                 guard let s = try? await server.live(sid) else { break }
+                // The Mac keeps only the step being written. When it moves on,
+                // the finished step is in the saved chat: read that again, or
+                // its text would vanish from the screen until the answer ends.
+                if let n = s.step, let seen = step, n != seen,
+                   let d = try? await server.peek(sid) {
+                    messages = d.messages
+                }
+                step = s.step ?? step
                 liveText = s.content
                 liveThinking = s.thinking
                 if !s.content.isEmpty { liveStatus = "" }
