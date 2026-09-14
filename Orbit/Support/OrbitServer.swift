@@ -182,13 +182,15 @@ actor OrbitServer {
 
     /// Live buffer for a chat that is generating — used to rejoin an answer that
     /// started on the Mac or before the app was reopened.
-    func live(_ sid: String) async throws -> (running: Bool, content: String, thinking: String) {
+    /// `step` counts the steps the answer has moved past: the buffer holds only
+    /// the one being written (nil from a Mac that predates this).
+    func live(_ sid: String) async throws -> (running: Bool, content: String, thinking: String, step: Int?) {
         struct L: Codable {
             var known: Bool?; var running: Bool?; var content: String?
-            var thinking: String?; var status: String?
+            var thinking: String?; var status: String?; var step: Int?
         }
         let l = try await get("/api/live/\(sid)", as: L.self)
-        return (l.running ?? false, l.content ?? "", l.thinking ?? "")
+        return (l.running ?? false, l.content ?? "", l.thinking ?? "", l.step)
     }
 
     /// Any authenticated GET returning bytes — images, thumbnails, downloads.
