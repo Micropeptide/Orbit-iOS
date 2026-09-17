@@ -16,6 +16,14 @@ final class ChatActionsModel: ObservableObject {
     @Published var confirmBurn = false
     /// Row index to scroll to, picked in the jump sheet.
     @Published var jumpRequest: Int?
+    // the Claude Code commands' sheets: /rewind, /context, /diff, /help, /permissions
+    @Published var showRewind = false
+    @Published var showContext = false
+    @Published var showDiffs = false
+    @Published var showHelp = false
+    @Published var showPermissions = false
+    /// A command picked in /help, for the message box.
+    @Published var helpPick: String?
 
     struct CitationsRequest: Identifiable {
         let id = UUID()
@@ -142,6 +150,25 @@ struct ChatActionsHost: ViewModifier {
                 JumpSheet(messages: state.messages) { model.jumpRequest = $0 }
             }
             .sheet(isPresented: $model.showStats) { UsageStatsView(sid: sid) }
+            .sheet(isPresented: $model.showRewind) { RewindSheet() }
+            .sheet(isPresented: $model.showContext) { ContextSheet(sid: sid) }
+            .sheet(isPresented: $model.showDiffs) { DiffsSheet(diffs: state.shownDiffs[sid] ?? []) }
+            .sheet(isPresented: $model.showHelp) { CommandHelpSheet { model.helpPick = $0 } }
+            .sheet(isPresented: $model.showPermissions) { PermissionsSheet(sid: sid) }
+            .alert("Run this?", isPresented: Binding(get: { state.chatExtras.bangConfirm != nil },
+                                                     set: { if !$0 { state.chatExtras.bangConfirm = nil } }),
+                   presenting: state.chatExtras.bangConfirm) { c in
+                Button("Run") {
+                    state.chatExtras.bangConfirm = nil
+                    Task { await state.runBang(c.cmd, confirmed: true) }
+                }
+                Button("Cancel", role: .cancel) {
+                    state.chatExtras.bangConfirm = nil
+                    model.helpPick = "! " + c.cmd       // back in the box to change
+                }
+            } message: { c in
+                Text(c.cmd + "\n\n" + c.reason)
+            }
             .sheet(item: $model.exportURL) { ActivityView(items: [$0]).ignoresSafeArea() }
             .alert("Save as a skill", isPresented: $model.askSkillName) {
                 TextField("Skill name", text: $model.skillName)
@@ -196,6 +223,13 @@ struct ChatMenuItems: View {
         }
         Button { model.showJump = true } label: {
             Label("Jump to a message…", systemImage: "arrow.down.to.line")
+        }
+        Button { model.showRewind = true } label: {
+            Label("Rewind…", systemImage: "clock.arrow.circlepath")
+        }
+        .disabled(!state.messages.contains(where: \.isUser))
+        Button { model.showContext = true } label: {
+            Label("Context window", systemImage: "square.grid.3x3")
         }
         Button {
             Task {

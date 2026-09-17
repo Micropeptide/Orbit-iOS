@@ -76,11 +76,11 @@ final class SlashController: ObservableObject {
                claude: Bool) -> [SlashItem] {
         guard draft.hasPrefix("/"), !draft.contains(" "), !draft.contains("\n") else { return [] }
         let typed = draft.lowercased()
-        var seen = Set<String>()
-        var out: [SlashItem] = []
+        var all: [SlashItem] = []
+        var known = Set<String>()
         func add(_ c: String, _ d: String, _ k: SlashItem.Kind) {
-            guard c.lowercased().hasPrefix(typed), seen.insert(c.lowercased()).inserted else { return }
-            out.append(SlashItem(command: c, detail: d, kind: k))
+            guard known.insert(c.lowercased()).inserted else { return }
+            all.append(SlashItem(command: c, detail: d, kind: k))
         }
         for (c, d) in builtins { add(c, d, .builtin) }
         for (c, d) in Self.libraryCommands { add(c, d, .library) }
@@ -92,6 +92,31 @@ final class SlashController: ObservableObject {
                 guard let n = c.name, !n.isEmpty else { continue }
                 add("/" + n, String((c.description ?? "Claude Code").prefix(120)), .claude)
             }
+        }
+        return Self.rank(all, typed: typed)
+    }
+
+    /// Commands that start with what you typed first, then ones that contain it,
+    /// then ones whose description does, then its letters in order — so /ctx
+    /// still finds /context, as Claude Code's menu does.
+    static func rank(_ all: [SlashItem], typed: String) -> [SlashItem] {
+        var seen = Set<String>()
+        var out: [SlashItem] = []
+        func take(_ match: (SlashItem) -> Bool) {
+            for item in all where match(item) && seen.insert(item.id).inserted { out.append(item) }
+        }
+        take { $0.command.lowercased().hasPrefix(typed) }
+        let word = String(typed.dropFirst())
+        guard !word.isEmpty else { return out }
+        take { $0.command.lowercased().contains(word) }
+        take { $0.detail.lowercased().contains(word) }
+        take { item in
+            var rest = Substring(item.command.lowercased().dropFirst())
+            for ch in word {
+                guard let i = rest.firstIndex(of: ch) else { return false }
+                rest = rest[rest.index(after: i)...]
+            }
+            return true
         }
         return out
     }

@@ -29,6 +29,13 @@ extension AppState {
         guard let d = try? await server.peek(sid), openChat?.sid == sid, !streaming else { return }
         messages = d.messages
         Cache.saveMessages(d.messages, for: sid)
+        learnPlan(sid, from: d.messages)
+    }
+
+    /// The todo list in force for a chat, read from its saved messages.
+    func learnPlan(_ sid: String, from messages: [Message]) {
+        let steps = PlanStep.current(in: messages)
+        if plans[sid] != steps { plans[sid] = steps }
     }
 
     /// A question or approval waiting in the live buffer — raised while the

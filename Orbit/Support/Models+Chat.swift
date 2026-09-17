@@ -94,6 +94,10 @@ struct ChatExtras {
     var toast: String?
     /// The last chat moved to the bin from the list, for Undo.
     var binned: (sid: String, name: String, title: String)?
+    /// A `!` command the Mac wants confirmed before it runs.
+    var bangConfirm: BangConfirm?
+    /// Bumped when the permission mode changes from the mode line, so the work bar reads it again.
+    var workRevision = 0
 }
 
 // ------------------------------------------------------------------ per answer

@@ -10,7 +10,7 @@ struct WorkBar: View {
 
     /// Read again when the model changes, a turn lands or an answer starts or ends.
     private var refreshKey: String {
-        "\(sid)|\(state.currentModel ?? "")|\(state.messages.count)|\(state.streaming)"
+        "\(sid)|\(state.currentModel ?? "")|\(state.messages.count)|\(state.streaming)|\(state.chatExtras.workRevision)"
     }
 
     var body: some View {

@@ -27,6 +27,9 @@ struct ChatView: View {
     @ObservedObject private var links = FileLinks.shared
     /// Per-message and chat-level actions, and the sheets they open (Views/Chat).
     @StateObject private var actionsModel = ChatActionsModel()
+    @AppStorage("orbit.verboseTools") private var verboseTools = false
+    @AppStorage("orbit.todosHidden") private var todosHidden = false
+    @AppStorage("theme") private var theme = "system"
 
     var body: some View {
         // The banner and composer are safe-area insets rather than VStack rows:
@@ -115,6 +118,10 @@ struct ChatView: View {
                 draft = text; typing = true; state.draftPrefill = nil
             }
             .onChange(of: draft) { _, text in Drafts.save(sid, text) }
+            .onChange(of: actionsModel.helpPick) { _, text in
+                guard let text else { return }
+                draft = text; typing = true; actionsModel.helpPick = nil
+            }
             // questions and approvals are cards in the transcript (ChatPromptCards)
             .modifier(ChatActionsHost(sid: sid, model: actionsModel))
             .modifier(ToastOverlay())
@@ -143,13 +150,17 @@ struct ChatView: View {
                         .frame(maxWidth: .infinity)
                         .padding(.top, 80).padding(.horizontal, 24)
                     }
-                    ForEach(Array(state.messages.enumerated()), id: \.element.id) { i, m in
+                    let rows = TranscriptRow.build(state.messages)
+                    ForEach(rows) { row in
+                        let i = row.index
+                        let m = row.message
                         MessageBubble(message: m,
-                                      isLast: i == state.messages.count - 1,
+                                      isLast: row.id == rows.last?.id,
                                       onEdit: { msg in Task { await state.editAndResend(msg) } },
                                       onRegenerate: { actionsModel.confirmRegenerate = false },
                                       onQuote: { msg in quote(msg) },
-                                      actions: actionsModel.actions(state))
+                                      actions: actionsModel.actions(state),
+                                      showByline: row.showByline)
                             .id(m.id)
                             .padding(.horizontal, flashed == i ? 8 : 0)
                             .padding(.vertical, flashed == i ? 6 : 0)
@@ -169,6 +180,7 @@ struct ChatView: View {
             .scrollDismissesKeyboard(.interactively)
             .onChange(of: state.messages.count) { _, _ in scroll(proxy) }
             .onChange(of: state.liveText) { _, _ in scroll(proxy) }
+            .onChange(of: state.liveRuns.count + state.liveSteps.count) { _, _ in scroll(proxy) }
             .onChange(of: state.chatExtras.question?.id) { _, _ in scroll(proxy) }
             .onChange(of: state.chatExtras.approval?.id) { _, _ in scroll(proxy) }
             .onChange(of: actionsModel.jumpRequest) { _, i in
@@ -277,8 +289,11 @@ struct ChatView: View {
 
     // ------------------------------------------------------------ commands
 
-    /// `/new`, `/model`, `/compact`, `/find` — typed, or tapped from the strip.
+    /// `/new`, `/model`, `/compact`, `/find` and Claude Code's transcript
+    /// commands — typed, or tapped from the menu.
     private func command(_ raw: String) -> Bool {
+        let rest = raw.split(separator: " ", maxSplits: 1).dropFirst().joined()
+            .trimmingCharacters(in: .whitespaces)
         switch raw.lowercased().split(separator: " ").first.map(String.init) ?? "" {
         case "/new":
             Task { if let sid = await state.newChat() { state.deepLink = sid } }
@@ -286,8 +301,31 @@ struct ChatView: View {
         case "/compact": Task { await state.compactCurrent() }
         case "/find":
             finding = true; findFocused = true
-            let rest = raw.split(separator: " ", maxSplits: 1).dropFirst().joined()
             if !rest.isEmpty { findText = rest }
+        case "/rewind":
+            if state.messages.contains(where: \.isUser) { actionsModel.showRewind = true }
+            else { state.toast("Nothing to rewind to yet") }
+        case "/context":     actionsModel.showContext = true
+        case "/copy":        state.copyAnswer(Int(rest) ?? 1)
+        case "/diff":        actionsModel.showDiffs = true
+        case "/verbose":
+            verboseTools.toggle()
+            state.toast(verboseTools ? "Showing every tool call in full" : "Tool calls folded again")
+        case "/todos":
+            todosHidden.toggle()
+            state.toast(todosHidden ? "Todo list hidden" : "Todo list shown")
+        case "/usage":       actionsModel.showStats = true
+        case "/permissions": actionsModel.showPermissions = true
+        case "/theme":
+            let order = ["system", "light", "dark"]
+            theme = order[((order.firstIndex(of: theme) ?? 0) + 1) % order.count]
+            state.toast("Theme: \(theme)")
+        case "/fork":
+            guard let last = state.messages.last(where: \.isUser) else {
+                state.toast("Nothing to fork yet"); return true
+            }
+            Task { await state.fork(from: last) }
+        case "/help":        actionsModel.showHelp = true
         default: return false
         }
         return true
@@ -321,32 +359,37 @@ struct ChatView: View {
         typing = true
     }
 
+    /// The answer being written: the steps it has finished, then the one in hand.
+    /// It continues the block above when that is already this answer's.
     private var liveBubble: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            Text(state.liveModel.isEmpty ? currentModelName : state.liveModel)
-                .font(.caption2.smallCaps())
-                .foregroundStyle(.secondary)
-
-            ForEach(state.liveTools, id: \.self) { ToolLine(text: $0) }
-
-            if !state.liveStatus.isEmpty && state.liveText.isEmpty {
-                HStack(spacing: 7) {
-                    ProgressView().controlSize(.mini)
-                    Text(state.liveStatus).font(.footnote).foregroundStyle(.secondary)
-                }
+        let continues = state.messages.last.map { !$0.isUser } ?? false
+        return VStack(alignment: .leading, spacing: 18) {
+            ForEach(Array(state.liveSteps.enumerated()), id: \.element.id) { n, step in
+                MessageBubble(message: step, showByline: n == 0 && !continues)
             }
-
-            if !state.liveText.isEmpty {
-                MarkdownText(state.liveText)
-            } else if state.liveStatus.isEmpty {
-                HStack(spacing: 7) {
-                    ProgressView().controlSize(.mini)
-                    Text("thinking").font(.footnote).foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 7) {
+                if state.liveSteps.isEmpty && !continues {
+                    Text(state.liveModel.isEmpty ? currentModelName : state.liveModel)
+                        .font(.caption2.smallCaps())
+                        .foregroundStyle(.secondary)
                 }
-            }
 
-            if !state.liveThinking.isEmpty {
-                ThinkingBlock(text: state.liveThinking)
+                if !state.liveStatus.isEmpty && state.liveText.isEmpty && state.liveRuns.isEmpty {
+                    HStack(spacing: 7) {
+                        ProgressView().controlSize(.mini)
+                        Text(state.liveStatus).font(.footnote).foregroundStyle(.secondary)
+                    }
+                }
+
+                if !state.liveText.isEmpty { MarkdownText(state.liveText) }
+                ForEach(state.liveTools, id: \.self) { ToolLine(text: $0) }
+                if !state.liveRuns.isEmpty { ToolRunsView(runs: state.liveRuns) }
+
+                if !state.liveThinking.isEmpty {
+                    ThinkingBlock(text: state.liveThinking,
+                                  live: state.liveThoughtSecs == nil && state.liveText.isEmpty && state.liveRuns.isEmpty,
+                                  secs: state.liveThoughtSecs)
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -355,39 +398,14 @@ struct ChatView: View {
     // ------------------------------------------------------------ composer
 
     private var composer: some View {
-        Composer(draft: $draft, typing: $typing, modelName: currentModelName,
-                 onPickModel: { showModels = true },
-                 onCommand: { command($0) })
-    }
-}
-
-/// Reasoning, folded away. Open it when you want to see how it got there.
-struct ThinkingBlock: View {
-    let text: String
-    @State private var open = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Button {
-                withAnimation(.easeInOut(duration: 0.15)) { open.toggle() }
-            } label: {
-                HStack(spacing: 5) {
-                    Image(systemName: open ? "chevron.down" : "chevron.right")
-                        .font(.caption2)
-                    Text("thinking").font(.caption)
-                }
-                .foregroundStyle(.secondary)
-            }
-            if open {
-                Text(text)
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-                    .padding(10)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(.quaternary.opacity(0.3), in: .rect(cornerRadius: 9))
-            }
+        VStack(spacing: 0) {
+            TodoDock(sid: sid)
+            AnswerStatusLine(sid: sid)
+            Composer(draft: $draft, typing: $typing, modelName: currentModelName,
+                     onPickModel: { showModels = true },
+                     onCommand: { command($0) })
         }
+        .background(.bar)       // one bar behind the todo list, status line and box
     }
 }
 

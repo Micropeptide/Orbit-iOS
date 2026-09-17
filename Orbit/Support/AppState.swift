@@ -65,6 +65,26 @@ final class AppState: ObservableObject {
     @Published var liveTools: [String] = []
     @Published var liveStatus = ""
     @Published var liveModel = ""
+    /// The current step's tool calls, running and finished. `liveTools` keeps
+    /// the notices (auto-approved, blocked, a switch of model).
+    @Published var liveRuns: [ToolRun] = []
+    /// Steps of this answer already over: each is its thinking, its words and
+    /// the tools it then called, the way the saved chat splits them.
+    @Published var liveSteps: [Message] = []
+    /// For the status line: when the answer began, its word for the work,
+    /// roughly how much has come back, and since when it has been thinking.
+    /// Read by a timer, so they need not publish.
+    var liveStartedAt = Date()
+    var liveVerb = "Working"
+    var liveChars = 0
+    var liveThinkingSince: Date?
+    /// When this step's thinking began, and how long it took once words came.
+    private var stepThinkStart: Date?
+    @Published var liveThoughtSecs: Double?
+    /// Each chat's todo list, from the plan tool.
+    @Published var plans: [String: [PlanStep]] = [:]
+    /// File edits shown while answers ran here, per chat, for /diff.
+    @Published var shownDiffs: [String: [ShownDiff]] = [:]
     @Published var pendingApproval: (name: String, reason: String, id: String)?
     /// Questions, approvals, plan mode, temporary chat, row status (AppState+Chat.swift).
     @Published var chatExtras = ChatExtras()
@@ -271,6 +291,7 @@ final class AppState: ObservableObject {
         flushTask?.cancel(); flushTask = nil; pendingText = ""
         streaming = false; liveSid = nil
         liveText = ""; liveThinking = ""; liveTools = []; liveStatus = ""
+        liveRuns = []; liveSteps = []; liveThinkingSince = nil; stepThinkStart = nil; liveThoughtSecs = nil
         pendingApproval = nil
         chatExtras.question = nil; chatExtras.approval = nil
     }
@@ -301,6 +322,7 @@ final class AppState: ObservableObject {
             }
             messages = fresh
             Cache.saveMessages(fresh, for: id)
+            learnPlan(id, from: fresh)
             await loadModels()
             // already attached (SSE or poll) when it is the chat we are watching
             if d.running == true, liveSid != id { await rejoin(id) }
@@ -330,6 +352,7 @@ final class AppState: ObservableObject {
                     // changed elsewhere: read it without moving what the Mac has open
                     if let d = try? await server.peek(id) {
                         self.messages = d.messages
+                        self.learnPlan(id, from: d.messages)
                         if let t = d.title { self.openChat?.title = t }
                         Cache.saveMessages(d.messages, for: id)
                     }
@@ -353,6 +376,8 @@ final class AppState: ObservableObject {
             : ([text] + going.map { "📎 \($0.name)" })
                 .filter { !$0.isEmpty }.joined(separator: "\n")
         messages.append(Message(role: "user", text: label))
+        // each new request starts a fresh plan on the Mac; "continue" carries the old one on
+        if !text.lowercased().hasPrefix("continue") { plans[sid] = nil }
         beginLive(for: sid)
 
         streamTask = Task {
@@ -398,6 +423,8 @@ final class AppState: ObservableObject {
         streaming = true
         flushTask?.cancel(); flushTask = nil
         liveText = ""; liveThinking = ""; liveTools = []; liveStatus = ""
+        liveRuns = []; liveSteps = []
+        startStatusLine()
         pendingText = ""
         liveModel = models.first { $0.id == currentModel }?.display ?? ""
         pendingApproval = nil
@@ -427,11 +454,37 @@ final class AppState: ObservableObject {
 
     private func apply(_ ev: StreamEvent) {
         switch ev {
-        case .content(let t):  queueText(t)
-        case .thinking(let t): liveThinking += t
+        case .content(let t):
+            nextStep()
+            liveChars += t.count
+            // words have begun: the thinking before them is over
+            if let s = stepThinkStart, liveThoughtSecs == nil { liveThoughtSecs = Date().timeIntervalSince(s) }
+            liveThinkingSince = nil
+            queueText(t)
+        case .thinking(let t):
+            nextStep()
+            liveChars += t.count
+            if liveThinking.isEmpty { stepThinkStart = Date(); liveThoughtSecs = nil }
+            if liveThinkingSince == nil { liveThinkingSince = Date() }
+            liveThinking += t
         case .model(let m):    liveModel = m
-        case .tool(let n, let a): liveTools.append(a.isEmpty ? n : "\(n)(\(a))")
-        case .toolResult:      break
+        case .tool(let run):
+            flushText()
+            liveRuns.append(run)
+        case .toolResult(let r, let diff):
+            if let i = liveRuns.lastIndex(where: { $0.id == r.id && !$0.done })
+                ?? liveRuns.lastIndex(where: { $0.name == r.name && !$0.done }) {
+                liveRuns[i].complete(with: r)
+            } else {
+                liveRuns.append(r)          // an older Mac: a result with no call before it
+            }
+            if let sid = liveSid {
+                if r.name == "plan", let out = r.output {
+                    let steps = PlanStep.parse(out)
+                    if !steps.isEmpty { plans[sid] = steps }
+                }
+                if let diff { shownDiffs[sid, default: []].append(diff) }
+            }
         case .status(let s):   liveStatus = s
         case .blocked(let r):  liveTools.append("refused: \(r)")
         case .autoApproved(let n, let r): liveTools.append("✓ auto-approved \(n) — \(r)")
@@ -481,20 +534,61 @@ final class AppState: ObservableObject {
             .requestAuthorization(options: [.alert, .sound]) { _, _ in }
     }
 
+    // ------------------------------------------------------------ steps and the status line
+
+    private static let statusVerbs = ["Working", "Pondering", "Brewing", "Churning", "Cooking", "Crunching",
+        "Percolating", "Puzzling", "Simmering", "Spelunking", "Synthesising", "Tinkering", "Wrangling",
+        "Orbiting", "Noodling", "Whirring", "Mulling", "Sifting", "Assembling", "Unravelling",
+        "Untangling", "Composing"]
+
+    private func startStatusLine() {
+        liveStartedAt = Date()
+        liveVerb = Self.statusVerbs.randomElement() ?? "Working"
+        liveChars = 0
+        liveThinkingSince = nil
+        stepThinkStart = nil
+        liveThoughtSecs = nil
+    }
+
+    /// The current step as a message: its words, its thinking, then the tools it called.
+    private func currentStep() -> Message? {
+        guard !liveText.isEmpty || !liveThinking.isEmpty || !liveRuns.isEmpty || !liveTools.isEmpty else { return nil }
+        var m = Message(role: "assistant", text: liveText,
+                        tools: liveTools.isEmpty ? nil : liveTools,
+                        model: liveModel.isEmpty ? nil : liveModel,
+                        thinking: liveThinking.isEmpty ? nil : liveThinking)
+        m.tool_runs = liveRuns.isEmpty ? nil : liveRuns.map { r in
+            var r = r
+            r.markStopped()
+            return r
+        }
+        m.thoughtSecs = liveThoughtSecs ?? stepThinkStart.map { Date().timeIntervalSince($0) }
+        return m
+    }
+
+    /// New words or thinking after tool calls begin a new step, so each step's
+    /// text sits with the tools it went on to call.
+    private func nextStep() {
+        guard !liveRuns.isEmpty || !liveTools.isEmpty else { return }
+        flushText()
+        if let step = currentStep() { liveSteps.append(step) }
+        liveText = ""; liveThinking = ""; liveRuns = []; liveTools = []
+        stepThinkStart = nil; liveThoughtSecs = nil
+    }
+
     private func finishLive(sid: String) {
         flushText()
         guard liveSid == sid || liveSid == nil else { return }
         liveSid = nil
-        if !liveText.isEmpty || !liveThinking.isEmpty {
-            messages.append(Message(role: "assistant", text: liveText,
-                                    tools: liveTools.isEmpty ? nil : liveTools,
-                                    model: liveModel.isEmpty ? nil : liveModel,
-                                    thinking: liveThinking.isEmpty ? nil : liveThinking))
+        let steps = liveSteps + [currentStep()].compactMap { $0 }
+        if !steps.isEmpty {
+            messages.append(contentsOf: steps)
             Cache.saveMessages(messages, for: sid)
         }
-        let answered = liveText
+        let answered = steps.map(\.text).filter { !$0.isEmpty }.joined(separator: "\n\n")
         streaming = false
         liveText = ""; liveThinking = ""; liveTools = []; liveStatus = ""
+        liveRuns = []; liveSteps = []; liveThinkingSince = nil; stepThinkStart = nil; liveThoughtSecs = nil
         chatExtras.question = nil; chatExtras.approval = nil; pendingApproval = nil
         if !answered.isEmpty {
             notifyIfBackgrounded(title: openChat?.title ?? "Orbit", body: answered, sid: sid)
@@ -505,6 +599,7 @@ final class AppState: ObservableObject {
     /// Reconnect to an answer already running on the Mac.
     func rejoin(_ sid: String) async {
         guard let server else { return }
+        if !streaming { startStatusLine() }
         liveSid = sid
         streaming = true
         liveStatus = "picking up an answer already running"
@@ -524,6 +619,12 @@ final class AppState: ObservableObject {
                 await pickUpPrompts(sid)            // a question or approval raised elsewhere
                 liveText = s.content
                 liveThinking = s.thinking
+                liveChars = max(liveChars, s.content.count + s.thinking.count)
+                if s.content.isEmpty, !s.thinking.isEmpty {
+                    if liveThinkingSince == nil { liveThinkingSince = Date() }
+                } else {
+                    liveThinkingSince = nil
+                }
                 if !s.content.isEmpty { liveStatus = "" }
                 if !s.running {
                     finishLive(sid: sid)
