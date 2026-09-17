@@ -218,7 +218,16 @@ enum ToolText {
         let fp = args["file_path"] ?? args["notebook_path"] ?? args["path"] ?? args["file"]
         if let fp, ["Read", "Write", "Update", "Edit notebook", "List"].contains(disp) { return shortPath(fp) }
         if disp == "Bash" || disp == "Python" {
-            return String(oneLine(args["command"] ?? args["code"] ?? args["script"] ?? "").prefix(120))
+            var c = oneLine(args["command"] ?? args["code"] ?? args["script"] ?? "")
+            // Codex wraps every command in a login shell: show the command itself
+            if let r = c.range(of: #"^(?:/(?:usr/)?bin/)?(?:ba|z)?sh -l?c (['"])([\s\S]*)\1$"#, options: .regularExpression),
+               r == c.startIndex..<c.endIndex {
+                let quote = c.first(where: { $0 == "'" || $0 == "\"" }) ?? "'"
+                if let open = c.firstIndex(of: quote), let close = c.lastIndex(of: quote), open < close {
+                    c = String(c[c.index(after: open)..<close])
+                }
+            }
+            return String(c.prefix(120))
         }
         if disp == "Search" {
             return String((args["pattern"] ?? args["query"] ?? args["glob"] ?? "").prefix(90))
@@ -614,22 +623,20 @@ struct TranscriptRow: Identifiable {
     var message: Message
     /// Only the first step of an answer names the model.
     var showByline: Bool
+    /// A step with nothing but tool calls, drawn tucked under the step before it.
+    var joinsPrevious = false
     var id: UUID { message.id }
 
-    /// Tool-only steps merged into the step before; bylines only where an answer begins.
+    /// One row per message; bylines only where an answer begins. (Merging tool-only steps
+    /// into one tall row left the lazy transcript blank on long chats, so they stay their
+    /// own rows and are drawn close under the step before instead.)
     static func build(_ messages: [Message]) -> [TranscriptRow] {
         var rows: [TranscriptRow] = []
         rows.reserveCapacity(messages.count)
         for (i, m) in messages.enumerated() {
-            if m.onlyToolCalls, let last = rows.last, !last.message.isUser {
-                rows[rows.count - 1].message.tool_runs = (last.message.tool_runs ?? []) + (m.tool_runs ?? [])
-                if let lines = m.tools, !lines.isEmpty {
-                    rows[rows.count - 1].message.tools = (last.message.tools ?? []) + lines
-                }
-                continue
-            }
             let afterAnswer = rows.last.map { !$0.message.isUser } ?? false
-            rows.append(TranscriptRow(index: i, message: m, showByline: m.isUser || !afterAnswer))
+            rows.append(TranscriptRow(index: i, message: m, showByline: m.isUser || !afterAnswer,
+                                      joinsPrevious: afterAnswer && m.onlyToolCalls))
         }
         return rows
     }
