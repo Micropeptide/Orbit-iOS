@@ -36,7 +36,7 @@ struct OnboardingTips: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
-                    Text("Paired with \(state.pairing?.name ?? "your Mac"). A few things worth knowing:")
+                    Text("Paired with \(state.macDisplayName). A few things worth knowing:")
                         .font(.callout).foregroundStyle(.secondary)
                     ForEach(tips) { t in
                         HStack(alignment: .top, spacing: 14) {

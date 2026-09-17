@@ -20,10 +20,8 @@ struct ChatListView: View {
     /// A full hostname does not fit a phone title bar and says nothing
     /// useful past the first word.
     private var shortMacName: String {
-        let raw = state.pairing?.name ?? "Orbit"
-        // a network host name ("vpn-172-27-178-41…", "192.168.1.5") is no name for a Mac;
-        // Macs paired since the server sends its own name ("Sam's MacBook Pro")
-        if raw.range(of: #"\d+[-.]\d+"#, options: .regularExpression) != nil { return "Orbit" }
+        let raw = state.macDisplayName
+        if raw == "your Mac" { return "Orbit" }
         if raw.contains(" ") { return raw }
         let first = raw.split(whereSeparator: { $0 == "-" || $0 == "." }).first.map(String.init)
         return (first?.isEmpty == false ? first! : raw)

@@ -102,10 +102,10 @@ actor OrbitServer {
 
     /// The addresses the Mac currently answers on, so a paired phone keeps
     /// learning them without rescanning.
-    func alternates() async throws -> (url: String?, alts: [String]) {
-        struct R: Codable { var url: String?; var alts: [String]? }
+    func alternates() async throws -> (url: String?, alts: [String], name: String?) {
+        struct R: Codable { var url: String?; var alts: [String]?; var mac_name: String? }
         let r = try await get("/api/remote", as: R.self)
-        return (r.url, r.alts ?? [])
+        return (r.url, r.alts ?? [], r.mac_name)
     }
 
     func chats(limit: Int = 100) async throws -> [ChatSummary] {
