@@ -522,8 +522,10 @@ struct RemoteAccess: Decodable {
     var tailscale: Tailscale?
     var port: Int?
     var hint: String?
+    /// The Mac's address on the network it is on now.
+    var lanIP: String?
 
-    enum CodingKeys: String, CodingKey { case mode, enabled, url, alts, token_set, tailscale, port, hint }
+    enum CodingKeys: String, CodingKey { case mode, enabled, url, alts, token_set, tailscale, port, hint, lan_ip }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         mode = c.lenient(String.self, .mode) ?? "off"
@@ -534,6 +536,7 @@ struct RemoteAccess: Decodable {
         tailscale = c.lenient(Tailscale.self, .tailscale)
         port = c.lenient(Int.self, .port)
         hint = c.lenient(String.self, .hint)
+        lanIP = c.lenient(String.self, .lan_ip)
     }
 }
 
@@ -574,6 +577,9 @@ struct HealthRow: Decodable, Identifiable, Hashable {
 
 struct AboutMac: Decodable {
     var version: String?
+    /// Where Orbit lives on the Mac: its folder map starts here.
+    var root: String?
+    var github: String?
     var model: String?
     var tools: [String]?
     var counts: [String: Int]?

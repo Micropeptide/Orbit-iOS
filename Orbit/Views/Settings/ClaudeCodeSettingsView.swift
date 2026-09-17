@@ -25,6 +25,7 @@ struct ClaudeCodeSettingsView: View {
             Section {
                 NavigationLink("Defaults for new chats") { ClaudeOptionsView() }
                 NavigationLink("Claude's permissions") { ClaudePermissionsView() }
+                NavigationLink("Machines over SSH") { ClaudeRemoteHostsView() }
             }
             Section {
                 NavigationLink("Skills") { ClaudeSkillsView() }
@@ -64,6 +65,18 @@ struct ClaudeOptionsView: View {
             if let error { ErrorRow(message: error) }
             if let info {
                 Section {
+                    // saved at once, like the web page's model menu: it is the Mac's
+                    // default model, not one of these options
+                    NavigationLink {
+                        ModelPickerView(only: { $0.id.hasPrefix("harness:") || $0.id.hasPrefix("claude-qwen") },
+                                        selected: state.defaultModel,
+                                        title: "Default model",
+                                        onPick: { m in Task { await setDefaultModel(m.id) } },
+                                        embedded: true)
+                    } label: {
+                        LabeledContent("Model", value: state.models.first { $0.id == state.defaultModel }?.display
+                                       ?? "choose")
+                    }
                     Picker("Permission mode", selection: string("permission_mode")) {
                         Text("Claude's own").tag("")
                         ForEach(PermissionModes.labels, id: \.id) { Text($0.label).tag($0.id) }
@@ -82,8 +95,8 @@ struct ClaudeOptionsView: View {
                     Text("Defaults for new chats")
                 } footer: {
                     Text("Each chat can still change its own. Auto: Claude decides which actions are safe "
-                         + "to run without asking, and asks for the rest. The default model is chosen on the "
-                         + "main Settings screen.")
+                         + "to run without asking, and asks for the rest. The model is saved as soon as you "
+                         + "pick it.")
                 }
 
                 Section {
@@ -225,6 +238,14 @@ struct ClaudeOptionsView: View {
             hosts = ((try? await s.sshHosts()) ?? []).map(\.host)
             error = nil
         } catch { self.error = error.localizedDescription }
+    }
+
+    private func setDefaultModel(_ id: String) async {
+        do {
+            try await state.requireServer().setDefaultModel(id)
+            await state.loadModels()
+            note = "default model saved"
+        } catch { note = error.localizedDescription }
     }
 
     private func save() async {
