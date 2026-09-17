@@ -112,15 +112,21 @@ private extension String {
 enum PromptHistory {
     private static let key = "orbit.promptHistory"
 
+    /// Oldest first, each text once (lists saved before `push` removed copies may have repeats).
     static func load() -> [String] {
-        UserDefaults.standard.stringArray(forKey: key) ?? []
+        let raw = UserDefaults.standard.stringArray(forKey: key) ?? []
+        var seen = Set<String>()
+        return raw.reversed().filter { seen.insert($0).inserted }.reversed()
     }
 
+    /// Sending something again moves it to the newest place rather than listing it
+    /// twice: the history sheet names its rows by their text.
     static func push(_ text: String) {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty, t.count <= 20_000 else { return }
         var h = load()
-        if h.last != t { h.append(t) }
+        h.removeAll { $0 == t }
+        h.append(t)
         UserDefaults.standard.set(Array(h.suffix(50)), forKey: key)
     }
 }
