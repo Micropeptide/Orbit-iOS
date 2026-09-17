@@ -19,7 +19,6 @@ struct FilePreviewSheet: View {
     @State private var loading = true
     @State private var shareURL: URL?
     @State private var sharing = false
-    @State private var copied = false
 
     private var info: ResolvedPath { target.info }
 
@@ -50,11 +49,8 @@ struct FilePreviewSheet: View {
                                 Label("Share", systemImage: "square.and.arrow.up")
                             }
                         }
-                        Button {
-                            UIPasteboard.general.string = info.path ?? info.displayName
-                            Haptics.success()
-                            copied = true
-                        } label: { Label("Copy path", systemImage: "doc.on.doc") }
+                        // copy paths and links, attach it or put its path in your message
+                        FileMenuItems(file: info, sid: target.sid, showPreview: false)
                         Button {
                             UIPasteboard.general.string = info.displayName
                             Haptics.success()
@@ -85,7 +81,6 @@ struct FilePreviewSheet: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             Text(note).font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
-            if copied { Text("Path copied").font(.caption).foregroundStyle(.green) }
         }
         .padding(30)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
