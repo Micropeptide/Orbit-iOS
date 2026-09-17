@@ -85,9 +85,11 @@ struct HarnessOverview: Decodable {
     var proxy: String?
     var gatewayPort: Int?
     var gatewayError: String?
+    /// Requests the gateway passed on since it started, and how many failed.
+    var gatewayStats: GatewayStats?
 
     enum CodingKeys: String, CodingKey { case providers, proxy, gateway }
-    enum GW: String, CodingKey { case port, error }
+    enum GW: String, CodingKey { case port, error, stats }
 
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
@@ -96,6 +98,7 @@ struct HarnessOverview: Decodable {
         if let g = try? c.nestedContainer(keyedBy: GW.self, forKey: .gateway) {
             gatewayPort = g.lenient(Int.self, .port)
             gatewayError = g.lenient(String.self, .error)
+            gatewayStats = g.lenient(GatewayStats.self, .stats)
         }
     }
 
@@ -174,6 +177,8 @@ struct HarnessAccount: Decodable, Identifiable, Hashable {
     var exhaustedUntil: Double?
     var live: LiveUsage?
     var monthSpent: Double?
+    /// Spend through Orbit per window (5 hours, week, month).
+    var usage: OrbitSpend?
 
     enum CodingKeys: String, CodingKey { case id, label, key, key_set, active, exhausted, live, usage }
     struct Exhausted: Decodable, Hashable { var until: Double? }
@@ -192,6 +197,7 @@ struct HarnessAccount: Decodable, Identifiable, Hashable {
         exhaustedUntil = c.lenient(Exhausted.self, .exhausted)?.until
         live = c.lenient(LiveUsage.self, .live)
         monthSpent = c.lenient(Usage.self, .usage)?.windows?["month"]?.spent
+        usage = c.lenient(OrbitSpend.self, .usage)
     }
 }
 
@@ -229,6 +235,8 @@ struct HarnessModel: Decodable, Identifiable, Hashable {
     var context: Int?
     var hidden: Bool
     var monthSpent: Double?
+    /// What this model spent through Orbit, against the account's allowance.
+    var usage: OrbitSpend?
 
     enum CodingKeys: String, CodingKey { case id, label, format, context, hidden, usage }
 
@@ -240,6 +248,7 @@ struct HarnessModel: Decodable, Identifiable, Hashable {
         context = c.lenient(Double.self, .context).map { Int($0) }
         hidden = c.lenient(Bool.self, .hidden) ?? false
         monthSpent = c.lenient(HarnessAccount.Usage.self, .usage)?.windows?["month"]?.spent
+        usage = c.lenient(OrbitSpend.self, .usage)
     }
 
     var formatLabel: String {
@@ -513,8 +522,10 @@ struct RemoteAccess: Decodable {
     var tailscale: Tailscale?
     var port: Int?
     var hint: String?
+    /// The Mac's address on the network it is on now.
+    var lanIP: String?
 
-    enum CodingKeys: String, CodingKey { case mode, enabled, url, alts, token_set, tailscale, port, hint }
+    enum CodingKeys: String, CodingKey { case mode, enabled, url, alts, token_set, tailscale, port, hint, lan_ip }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         mode = c.lenient(String.self, .mode) ?? "off"
@@ -525,6 +536,7 @@ struct RemoteAccess: Decodable {
         tailscale = c.lenient(Tailscale.self, .tailscale)
         port = c.lenient(Int.self, .port)
         hint = c.lenient(String.self, .hint)
+        lanIP = c.lenient(String.self, .lan_ip)
     }
 }
 
@@ -565,6 +577,9 @@ struct HealthRow: Decodable, Identifiable, Hashable {
 
 struct AboutMac: Decodable {
     var version: String?
+    /// Where Orbit lives on the Mac: its folder map starts here.
+    var root: String?
+    var github: String?
     var model: String?
     var tools: [String]?
     var counts: [String: Int]?

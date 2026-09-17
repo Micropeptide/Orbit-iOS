@@ -83,25 +83,29 @@ struct ConnectionBanner: View {
     @EnvironmentObject var state: AppState
 
     var body: some View {
-        if state.reachable == false {
-            HStack(spacing: 8) {
-                Image(systemName: "wifi.slash")
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("Can't reach \(state.pairing?.name ?? "your Mac")")
-                        .font(.footnote.weight(.semibold))
-                    Text("Showing the last copy. It will catch up when the Mac is awake.")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+        VStack(spacing: 0) {
+            if state.reachable == false {
+                HStack(spacing: 8) {
+                    Image(systemName: "wifi.slash")
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Can't reach \(state.pairing?.name ?? "your Mac")")
+                            .font(.footnote.weight(.semibold))
+                        Text("Showing the last copy. It will catch up when the Mac is awake.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button("Retry") { Task { await state.refreshEverything() } }
+                        .font(.caption.weight(.semibold))
+                        .buttonStyle(.bordered)
                 }
-                Spacer()
-                Button("Retry") { Task { await state.refreshEverything() } }
-                    .font(.caption.weight(.semibold))
-                    .buttonStyle(.bordered)
+                .padding(.horizontal, 14).padding(.vertical, 9)
+                .background(.thinMaterial)
+                .overlay(Divider(), alignment: .bottom)
+                .transition(.move(edge: .top).combined(with: .opacity))
             }
-            .padding(.horizontal, 14).padding(.vertical, 9)
-            .background(.thinMaterial)
-            .overlay(Divider(), alignment: .bottom)
-            .transition(.move(edge: .top).combined(with: .opacity))
+            // reachable but running old code: the interface needs a restart
+            InterfaceStaleBanner()
         }
     }
 }

@@ -10,6 +10,9 @@ struct PhoneAccessView: View {
     @State private var pendingMode: String?
     @State private var confirmRotate = false
     @State private var busy = false
+    /// The Mac's pairing QR (PNG), fetched with this phone's own pairing.
+    @State private var qr: Data?
+    @State private var qrChecked = false
 
     private let modes: [(id: String, label: String, why: String)] = [
         ("off", "Off", "Only the Mac itself can reach Orbit. The default."),
@@ -62,7 +65,41 @@ struct PhoneAccessView: View {
                         }
                     }
                     LabeledContent("Tailscale", value: tailscaleLine(r.tailscale))
+                    LabeledContent("This network", value: r.lanIP ?? "unknown")
                     LabeledContent("Pairing token", value: r.tokenSet ? "set" : "none")
+                }
+
+                if r.enabled, r.url != nil {
+                    Section {
+                        if let qr, let image = UIImage(data: qr) {
+                            HStack {
+                                Spacer()
+                                Image(uiImage: image)
+                                    .interpolation(.none).resizable().scaledToFit()
+                                    .frame(width: 190, height: 190)
+                                    .padding(8)
+                                    .background(.white, in: .rect(cornerRadius: 12))
+                                Spacer()
+                            }
+                            .accessibilityLabel("Pairing QR code")
+                        } else if qrChecked {
+                            Text("The Mac has no address to put in a code yet.")
+                                .font(.footnote).foregroundStyle(.secondary)
+                        } else {
+                            LoadingRow(text: "Asking the Mac for the code")
+                        }
+                    } header: {
+                        Text("Pair another device")
+                    } footer: {
+                        Text("Scan it with the Orbit app on another iPhone or iPad. The code carries the address "
+                             + "and the pairing token, which is stored in that device's Keychain and never typed. "
+                             + "Anyone who sees this code can pair — show it only to your own devices.")
+                    }
+                } else {
+                    Section {
+                        Text("Turn on a mode above, then restart, to pair a device.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
                 }
 
                 if r.enabled {
@@ -125,8 +162,16 @@ struct PhoneAccessView: View {
     }
 
     private func load() async {
-        do { remote = try await state.requireServer().remoteAccess(); error = nil }
-        catch { self.error = error.localizedDescription }
+        do {
+            let s = try state.requireServer()
+            let r = try await s.remoteAccess()
+            remote = r
+            error = nil
+            if r.enabled, r.url != nil {
+                qr = (try? await s.pairingQR()) ?? nil
+                qrChecked = true
+            }
+        } catch { self.error = error.localizedDescription }
     }
 
     private func setMode(_ m: String) async {

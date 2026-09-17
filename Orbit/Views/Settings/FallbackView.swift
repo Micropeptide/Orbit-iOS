@@ -8,6 +8,8 @@ struct FallbackView: View {
     @State private var enabled = true
     @State private var after = 3
     @State private var sameModel = true
+    /// Carry on by itself once a plan's allowance resets. The Mac treats unset as on.
+    @State private var resumeAfterLimit = true
     @State private var list: [String] = []
     @State private var adding = ""
     @State private var error: String?
@@ -30,6 +32,22 @@ struct FallbackView: View {
                     Text("Same model first tries that model from another provider before moving on "
                          + "(for example DeepSeek on OpenCode Zen when OpenCode Go is down). Claude Code "
                          + "and Codex retry on their own first.")
+                }
+
+                Section {
+                    Toggle(isOn: Binding(get: { resumeAfterLimit },
+                                         set: { resumeAfterLimit = $0; save() })) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Plan limit reached")
+                            Text("carry on by itself when the allowance resets")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                } footer: {
+                    Text("When Claude's 5-hour or weekly limit, a ChatGPT limit or an OpenCode Go allowance "
+                         + "stops an answer or a scheduled task, the chat continues a minute after the reset "
+                         + "(read from the limit message or the account). It shows in Scheduled, where you "
+                         + "can move or cancel it.")
                 }
 
                 Section {
@@ -102,6 +120,7 @@ struct FallbackView: View {
             after = s["fallback_after"]?.int ?? 3
             if after < 1 { after = 3 }
             sameModel = s["fallback_same_model"]?.bool ?? true
+            resumeAfterLimit = s["resume_after_limit"]?.bool ?? true
             list = s["fallback_models"]?.strings ?? []
             loaded = true
             error = nil
@@ -111,7 +130,8 @@ struct FallbackView: View {
 
     private func save() {
         let body: [String: Any] = ["fallback_enabled": enabled, "fallback_after": after,
-                                   "fallback_same_model": sameModel, "fallback_models": list]
+                                   "fallback_same_model": sameModel, "fallback_models": list,
+                                   "resume_after_limit": resumeAfterLimit]
         Task {
             do { try await state.requireServer().saveSettings(body); note = "saved" }
             catch { note = error.localizedDescription }

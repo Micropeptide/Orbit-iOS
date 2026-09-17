@@ -90,6 +90,8 @@ final class AppState: ObservableObject {
     @Published var chatExtras = ChatExtras()
     /// The list's paging, /tasks and the first-pairing tips (AppState+Work.swift).
     @Published var work = WorkExtras()
+    /// Allowance, spend and cheaper hours for the model picker (AppState+Usage.swift).
+    @Published var usage = UsageState()
 
     private(set) var server: OrbitServer?
     private var streamTask: Task<Void, Never>?
@@ -530,6 +532,7 @@ final class AppState: ObservableObject {
             chatExtras.approval = a
             pendingApproval = (a.name, a.reason, a.id)
         case .roundLimit(let why): chatExtras.roundLimit = why
+        case .usageLimit(let msg): noteUsageLimit(msg)
         case .error(let e):    lastError = e
         case .end(_, let title):
             if let title, var c = openChat {

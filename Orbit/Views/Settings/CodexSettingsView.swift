@@ -189,10 +189,28 @@ struct CodexOptionsView: View {
     @State private var draft: [String: JSONValue] = [:]
     @State private var note: String?
     @State private var saving = false
+    /// The model new Codex chats start with while Codex mode is off (`codex_default`).
+    @State private var codexDefault: String?
+
+    /// In Codex mode the Mac's own default is the Codex one.
+    private var defaultModelID: String? {
+        state.harnessMode == .codex ? state.defaultModel : codexDefault
+    }
 
     var body: some View {
         Form {
             Section {
+                NavigationLink {
+                    ModelPickerView(only: { $0.id.hasPrefix("codex:") },
+                                    selected: defaultModelID,
+                                    title: "Default Codex model",
+                                    onPick: { m in Task { await setDefaultModel(m.id) } },
+                                    embedded: true)
+                } label: {
+                    LabeledContent("Model", value: defaultModelID.map { id in
+                        state.models.first { $0.id == id }?.display ?? id
+                    } ?? "Codex mode's last model")
+                }
                 Picker("Permission mode", selection: string("permission_mode", "auto")) {
                     ForEach(PermissionModes.labels, id: \.id) { Text($0.label).tag($0.id) }
                 }
@@ -249,7 +267,28 @@ struct CodexOptionsView: View {
                 Button(saving ? "Saving…" : "Save") { Task { await save() } }.disabled(draft.isEmpty || saving)
             }
         }
+        .task {
+            if let s = try? await state.requireServer().settings() {
+                codexDefault = s["codex_default"]?.string.flatMap { $0.isEmpty ? nil : $0 }
+            }
+        }
         .settingsNote($note)
+    }
+
+    /// Saved at once. In Codex mode it is the Mac's default model; otherwise
+    /// the model Codex chats start with when Codex mode is turned on.
+    private func setDefaultModel(_ id: String) async {
+        do {
+            let s = try state.requireServer()
+            if state.harnessMode == .codex {
+                try await s.setDefaultModel(id)
+                await state.loadModels()
+            } else {
+                try await s.saveSettings(["codex_default": id])
+                codexDefault = id
+            }
+            note = "default model saved"
+        } catch { note = error.localizedDescription }
     }
 
     private var hostChoices: [String] {

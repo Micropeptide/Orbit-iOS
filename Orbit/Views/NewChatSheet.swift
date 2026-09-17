@@ -57,8 +57,11 @@ struct NewChatSheet: View {
                                         embedded: true)
                     } label: {
                         LabeledContent("Model") {
-                            Text(modelName).lineLimit(1)
-                                .foregroundStyle(model == nil ? .orange : .secondary)
+                            VStack(alignment: .trailing, spacing: 2) {
+                                Text(modelName).lineLimit(1)
+                                    .foregroundStyle(model == nil ? .orange : .secondary)
+                                ModelAllowanceLine(modelID: model)
+                            }
                         }
                     }
                 }

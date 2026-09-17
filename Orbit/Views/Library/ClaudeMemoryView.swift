@@ -14,6 +14,9 @@ struct ClaudeMemoryView: View {
     @State private var loading = true
     @State private var note: String?
     @State private var confirmDelete: ClaudeMemoryState.Item?
+    /// Any folder on the Mac, typed: Claude keeps memory for folders it has not worked in yet too.
+    @State private var askFolder = false
+    @State private var otherFolder = ""
 
     var body: some View {
         List {
@@ -125,6 +128,19 @@ struct ClaudeMemoryView: View {
             Text("The file goes to the Mac's Trash and its line leaves MEMORY.md.")
         }
         .libraryNote($note)
+        .alert("Folder on the Mac", isPresented: $askFolder) {
+            TextField("/path/to/folder", text: $otherFolder)
+                .autocorrectionDisabled().textInputAutocapitalization(.never)
+            Button("Open") {
+                let p = otherFolder.trimmingCharacters(in: .whitespaces)
+                guard !p.isEmpty else { return }
+                cwd = p
+                Task { await load() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The folder's full path. Its CLAUDE.md files and Claude's memory for it are shown.")
+        }
     }
 
     private func folderSection(_ d: ClaudeMemoryState) -> some View {
@@ -143,6 +159,13 @@ struct ClaudeMemoryView: View {
                     } label: {
                         Text("\(Self.tilde(f.path)) · \(f.count ?? 0)")
                     }
+                }
+                Divider()
+                Button {
+                    otherFolder = cwd ?? d.cwd
+                    askFolder = true
+                } label: {
+                    Label("Another folder…", systemImage: "folder")
                 }
             } label: {
                 HStack {
