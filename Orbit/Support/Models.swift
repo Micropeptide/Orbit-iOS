@@ -336,6 +336,8 @@ enum StreamEvent {
     case usageLimit(String)
     case error(String)
     case end(sid: String?, title: String?)
+    /// Sources, warnings, hooks, retries and the rest (Models+Transcript2.swift).
+    case extra(TranscriptEvent)
 }
 
 
@@ -598,12 +600,16 @@ struct ResolvedPath: Codable, Hashable, Identifiable {
     var url: String?             // a preview link relative to the Mac, needs no token
     var host: String?
     var line: Int?
+    // where it sits, ~-shortened, and when it last changed (for newest-first lists)
+    var dir: String?
+    var home: String?
+    var mtime: Double?
 
     var id: String { path ?? name ?? "?" }
     var displayName: String { name ?? (path as NSString?)?.lastPathComponent ?? "file" }
     var isFolder: Bool { kind == "folder" }
 
-    enum CodingKeys: String, CodingKey { case exists, path, name, kind, category, size, url, host, line }
+    enum CodingKeys: String, CodingKey { case exists, path, name, kind, category, size, url, host, line, dir, home, mtime }
 
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
@@ -616,5 +622,8 @@ struct ResolvedPath: Codable, Hashable, Identifiable {
         url = try? c.decode(String.self, forKey: .url)
         host = try? c.decode(String.self, forKey: .host)
         line = try? c.decode(Int.self, forKey: .line)
+        dir = try? c.decode(String.self, forKey: .dir)
+        home = try? c.decode(String.self, forKey: .home)
+        mtime = c.lenientDouble(.mtime)
     }
 }

@@ -24,6 +24,11 @@ final class ChatActionsModel: ObservableObject {
     @Published var showPermissions = false
     /// A command picked in /help, for the message box.
     @Published var helpPick: String?
+    /// Every file the chat names (/files).
+    @Published var showFiles = false
+    /// One of your messages to ask again from, or to rewind to, once confirmed.
+    @Published var retryFrom: Message?
+    @Published var rewindTo: Message?
 
     struct CitationsRequest: Identifiable {
         let id = UUID()
@@ -42,7 +47,11 @@ final class ChatActionsModel: ObservableObject {
                 self?.skillName = "captured-\(Int(Date.now.timeIntervalSince1970) % 10000)"
                 self?.askSkillName = true
             },
-            undo: { [weak self] m in self?.undo = m })
+            undo: { [weak self] m in self?.undo = m },
+            retryFrom: { [weak self] m in self?.retryFrom = m },
+            rewindTo: { [weak self] m in self?.rewindTo = m },
+            export: { [weak self] url in self?.exportURL = url },
+            title: state.openChat?.title ?? "Answer")
     }
 }
 
@@ -55,12 +64,25 @@ struct MessageActions {
     var checkDOIs: (Message) -> Void
     var saveSkill: () -> Void
     var undo: (Message) -> Void
+    var retryFrom: (Message) -> Void = { _ in }
+    var rewindTo: (Message) -> Void = { _ in }
+    /// Hand a file to the share sheet.
+    var export: (URL) -> Void = { _ in }
+    var title = "Answer"
 
     /// Added to a user message's menu.
     @ViewBuilder
     func userItems(_ m: Message) -> some View {
+        Button { retryFrom(m) } label: {
+            Label("Retry from here", systemImage: "arrow.clockwise")
+        }
+        .disabled(busy)
         Button { fork(m) } label: {
             Label("Fork from here", systemImage: "arrow.triangle.branch")
+        }
+        .disabled(busy)
+        Button { rewindTo(m) } label: {
+            Label("Rewind to here…", systemImage: "clock.arrow.circlepath")
         }
         .disabled(busy)
     }
@@ -74,11 +96,28 @@ struct MessageActions {
                 Haptics.success()
             } label: { Label("As Markdown", systemImage: "number") }
             Button {
+                AnswerExport.copyRich(markdown: m.text, plain: m.plainText)
+            } label: { Label("With formatting (Mail, Pages, Word)", systemImage: "textformat.alt") }
+            Button {
                 UIPasteboard.general.string = m.plainText
                 Haptics.success()
             } label: { Label("As plain text", systemImage: "textformat") }
         } label: {
             Label("Copy as…", systemImage: "doc.on.clipboard")
+        }
+        Menu {
+            Button {
+                if let url = try? AnswerExport.write(m.text, name: title, ext: "md") { export(url) }
+            } label: { Label("Save as Markdown…", systemImage: "number") }
+            Button {
+                let html = AnswerExport.document(title: title, body: AnswerExport.html(markdown: m.text))
+                if let url = try? AnswerExport.write(html, name: title, ext: "html") { export(url) }
+            } label: { Label("Save as HTML…", systemImage: "chevron.left.forwardslash.chevron.right") }
+            Button {
+                AnswerExport.print(title: title, markdown: m.text)
+            } label: { Label("Print or save as PDF…", systemImage: "printer") }
+        } label: {
+            Label("Export answer", systemImage: "square.and.arrow.up.on.square")
         }
         Button { checkDOIs(m) } label: {
             Label("Check DOIs", systemImage: "checkmark.seal")
@@ -119,7 +158,9 @@ struct AnswerFooter: View {
         if message.statsLine != nil || (n > 0 && actions != nil) {
             HStack(spacing: 10) {
                 if let s = message.statsLine {
-                    Text(s).font(.caption2.monospacedDigit()).foregroundStyle(.tertiary)
+                    let prompt = message.usage?.prompt_tokens ?? 0
+                    Text(s + (prompt > 0 ? " · \(prompt.formatted()) prompt tok" : ""))
+                        .font(.caption2.monospacedDigit()).foregroundStyle(.tertiary)
                 }
                 if n > 0, let actions {
                     Button { actions.undo(message) } label: {
@@ -141,6 +182,18 @@ struct ChatActionsHost: ViewModifier {
     @ObservedObject var model: ChatActionsModel
     @EnvironmentObject var state: AppState
     @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var links = FileLinks.shared
+
+    /// Later answers whose file changes can still be put back.
+    private func laterChanges(after m: Message) -> Int {
+        guard let i = state.messages.firstIndex(where: { $0.id == m.id }) else { return 0 }
+        return state.messages[(i + 1)...].reduce(0) { $0 + $1.undoableChanges.count }
+    }
+
+    private func rewind(_ m: Message, files: Bool) {
+        guard let index = state.userIndex(of: m) else { return }
+        Task { _ = await state.rewind(toUserIndex: index, files: files) }
+    }
 
     func body(content: Content) -> some View {
         content
@@ -155,6 +208,32 @@ struct ChatActionsHost: ViewModifier {
             .sheet(isPresented: $model.showDiffs) { DiffsSheet(diffs: state.shownDiffs[sid] ?? []) }
             .sheet(isPresented: $model.showHelp) { CommandHelpSheet { model.helpPick = $0 } }
             .sheet(isPresented: $model.showPermissions) { PermissionsSheet(sid: sid) }
+            .sheet(isPresented: $model.showFiles) { ChatFilesSheet(sid: sid) }
+            .sheet(item: $links.missing) { MissingFileSheet(target: $0) }
+            .confirmationDialog("Ask again from this message?",
+                                isPresented: Binding(get: { model.retryFrom != nil },
+                                                     set: { if !$0 { model.retryFrom = nil } }),
+                                titleVisibility: .visible, presenting: model.retryFrom) { m in
+                Button("Retry") { Task { await state.retry(from: m) } }
+                Button("Cancel", role: .cancel) {}
+            } message: { _ in
+                Text("Everything after it is removed and it is sent again.")
+            }
+            .confirmationDialog("Rewind the chat to just before this message?",
+                                isPresented: Binding(get: { model.rewindTo != nil },
+                                                     set: { if !$0 { model.rewindTo = nil } }),
+                                titleVisibility: .visible, presenting: model.rewindTo) { m in
+                let later = laterChanges(after: m)
+                Button("Rewind", role: .destructive) { rewind(m, files: false) }
+                if later > 0 {
+                    Button("Rewind and undo \(later) file change\(later == 1 ? "" : "s")", role: .destructive) {
+                        rewind(m, files: true)
+                    }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: { _ in
+                Text("Later messages are removed.")
+            }
             .alert("Run this?", isPresented: Binding(get: { state.chatExtras.bangConfirm != nil },
                                                      set: { if !$0 { state.chatExtras.bangConfirm = nil } }),
                    presenting: state.chatExtras.bangConfirm) { c in
@@ -230,6 +309,19 @@ struct ChatMenuItems: View {
         .disabled(!state.messages.contains(where: \.isUser))
         Button { model.showContext = true } label: {
             Label("Context window", systemImage: "square.grid.3x3")
+        }
+        Button { model.showFiles = true } label: {
+            Label("Files in this chat", systemImage: "folder")
+        }
+        Button {
+            Task {
+                let title = state.openChat?.title ?? "Chat"
+                let html = await AnswerExport.chatHTML(title: title, messages: state.messages, server: state.server)
+                do { model.exportURL = try AnswerExport.write(html, name: title, ext: "html") }
+                catch { state.lastError = error.localizedDescription }
+            }
+        } label: {
+            Label("Export as HTML (with figures)", systemImage: "doc.richtext")
         }
         Button {
             Task {

@@ -162,21 +162,25 @@ struct ChatView: View {
                         .padding(.top, 48).padding(.horizontal, 24)
                     }
                     let rows = transcriptRows
-                    let stamped = TranscriptRow.stamped(hideTools ? rows.filter { !$0.message.onlyToolCalls } : rows)
-                    ForEach(rows) { row in
+                    // /hidetools: steps that are only finished tool calls are left out of the rows
+                    // themselves (an empty conditional row upsets the lazy list's layout)
+                    let shown = hideTools ? rows.filter { !$0.message.onlyToolCalls } : rows
+                    let stamped = TranscriptRow.stamped(shown)
+                    let turns = TranscriptRow.turns(state.messages)
+                    ForEach(shown) { row in
                         let i = row.index
                         let m = row.message
-                        // /hidetools: a step that is only finished tool calls is left out
-                        if !(hideTools && m.onlyToolCalls) {
+                        let t = i < turns.count && turns[i].ends ? turns[i] : nil
                         VStack(alignment: .leading, spacing: 3) {
-                        MessageBubble(message: hideTools ? m.hidingTools : m,
-                                      isLast: row.id == rows.last?.id,
-                                      onEdit: { msg in Task { await state.editAndResend(msg) } },
-                                      onRegenerate: { actionsModel.confirmRegenerate = false },
-                                      onQuote: { msg in quote(msg) },
-                                      actions: actionsModel.actions(state),
-                                      showByline: row.showByline)
-                        if stamped.contains(m.id), let t = m.t { MessageTime(t: t, trailing: m.isUser) }
+                            MessageBubble(message: hideTools ? m.hidingTools : m,
+                                          isLast: row.id == rows.last?.id,
+                                          onEdit: { msg in Task { await state.editAndResend(msg) } },
+                                          onRegenerate: { actionsModel.confirmRegenerate = false },
+                                          onQuote: { msg in quote(msg) },
+                                          actions: actionsModel.actions(state),
+                                          showByline: row.showByline,
+                                          turn: t.map { ($0.turn, $0.prompt) })
+                            if stamped.contains(m.id), let at = m.t { MessageTime(t: at, trailing: m.isUser) }
                         }
                             .id(m.id)
                             .padding(.top, row.joinsPrevious ? -12 : 0)
@@ -185,7 +189,6 @@ struct ChatView: View {
                             .background(flashed == i ? Color.yellow.opacity(0.18) : .clear,
                                         in: .rect(cornerRadius: 10))
                             .id("row-\(i)")
-                        }
                     }
                     if state.streaming {
                         // each finished step of the running answer is its own row: packed into one
@@ -367,6 +370,7 @@ struct ChatView: View {
         case "/context":     actionsModel.showContext = true
         case "/copy":        state.copyAnswer(Int(rest) ?? 1)
         case "/diff":        actionsModel.showDiffs = true
+        case "/files":       actionsModel.showFiles = true
         case "/verbose":
             verboseTools.toggle()
             state.toast(verboseTools ? "Showing every tool call in full" : "Tool calls folded again")
@@ -447,6 +451,7 @@ struct ChatView: View {
                 if !state.liveText.isEmpty { MarkdownText(state.liveText) }
                 ForEach(state.liveTools, id: \.self) { ToolLine(text: $0) }
                 if !state.liveRuns.isEmpty { ToolRunsView(runs: state.liveRuns) }
+                LiveTurnExtras()
 
                 if !state.liveThinking.isEmpty {
                     ThinkingBlock(text: state.liveThinking,
