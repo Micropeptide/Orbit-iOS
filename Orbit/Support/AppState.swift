@@ -534,6 +534,7 @@ final class AppState: ObservableObject {
         case .roundLimit(let why): chatExtras.roundLimit = why
         case .usageLimit(let msg): noteUsageLimit(msg)
         case .error(let e):    lastError = e
+        case .extra(let e):    applyExtra(e)
         case .end(_, let title):
             if let title, var c = openChat {
                 c.title = title

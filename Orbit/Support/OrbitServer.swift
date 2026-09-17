@@ -431,6 +431,11 @@ actor OrbitServer {
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let kind = obj["k"] as? String else { return nil }
         let p = obj["p"]
+        // Claude Code's hooks report on every step: they fold into one line per answer
+        if kind == "notice", let msg = (p as? [String: Any])?["msg"] as? String ?? p as? String,
+           msg.range(of: #"^hook\s"#, options: [.regularExpression, .caseInsensitive]) != nil {
+            return .extra(.hook(msg))
+        }
 
         func str(_ key: String) -> String {
             ((p as? [String: Any])?[key] as? String) ?? ""
@@ -450,9 +455,11 @@ actor OrbitServer {
             let msg = str("msg")
             return .status(msg.isEmpty ? "starting the model" : msg)
         case "server_ready":   return .status("")
-        case "squeezed":       return .status("trimming older tool output")
+        case "squeezed", "autocompact_done", "stagnation", "round_limit", "interjection", "retry",
+             "sources", "weak_claims", "injection", "skill_hint", "long_running",
+             "plan_nudge", "fail_streak", "ultrathink":
+            return TranscriptEvent.parse(kind: kind, p).map { .extra($0) }
         case "autocompact":    return .status("summarising earlier turns")
-        case "autocompact_done", "stagnation": return .status("")
         case "blocked":        return .blocked(reason: str("reason"))
         case "auto_approved":  return .autoApproved(name: str("name"), reason: str("reason"))
         // "approval_request" carries the id /api/approve answers to; the bare
@@ -474,11 +481,6 @@ actor OrbitServer {
         // chat actions: a question mid-answer, and an answer that hit its limit
         case "question":
             return AskQuestion(p as? [String: Any]).map { .question($0) }
-        case "round_limit":
-            let d = p as? [String: Any]
-            let rounds = (d?["rounds"] as? Int).map { "after \($0) tool rounds" } ?? ""
-            return .roundLimit(str("reason") == "time" ? "stopped at the time limit" : "stopped \(rounds)")
-        case "interjection":   return .status("reading your note")
         case "queued":         return .status("waiting for another chat to finish")
         case "dequeued":       return .status("its turn — starting")
         // the chat was already answering: the Mac queued this message, and starts it
@@ -504,7 +506,6 @@ actor OrbitServer {
             if !why.isEmpty { line += " (\(why.prefix(80)))" }
             return .notice(line)
         case "interjected":    return .content("Sent in — it reads this at its next step.")
-        case "retry":          return .status("model error — retrying")
         case "subtask":
             let d = str("description")
             return .status(d.isEmpty ? "a helper is working" : "helper: \(d)")
