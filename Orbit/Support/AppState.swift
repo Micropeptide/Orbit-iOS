@@ -236,7 +236,19 @@ final class AppState: ObservableObject {
         if let u = found.url, !u.isEmpty { all.insert(u) }
         all.remove(p.url)
         let list = all.sorted()
-        if list != (p.alts ?? []) { p.alts = list.isEmpty ? nil : list; pairing = p }
+        var changed = false
+        if list != (p.alts ?? []) { p.alts = list.isEmpty ? nil : list; changed = true }
+        // the Mac's own name, which a phone paired from an older QR only knew as a host name
+        if let n = found.name, !n.isEmpty, n != p.name { p.name = n; changed = true }
+        if changed { pairing = p }
+    }
+
+    /// The Mac, the way to name it on screen: its own name, or "your Mac" when all the
+    /// phone has is a network host name ("vpn-172-27-…", an IP address).
+    var macDisplayName: String {
+        guard let raw = pairing?.name, !raw.isEmpty else { return "your Mac" }
+        if raw.range(of: #"\d+[-.]\d+"#, options: .regularExpression) != nil { return "your Mac" }
+        return raw
     }
 
     func loadChats() async {

@@ -15,7 +15,7 @@ struct SettingsView: View {
         return [
             "Orbit iOS \(b?["CFBundleShortVersionString"] as? String ?? "?") (\(b?["CFBundleVersion"] as? String ?? "?"))",
             "iOS \(UIDevice.current.systemVersion) · \(UIDevice.current.model)",
-            "Mac: \(state.pairing?.name ?? "—") at \(state.pairing?.url ?? "—")",
+            "Mac: \(state.macDisplayName) at \(state.pairing?.url ?? "—")",
             "Reachable: \(state.reachable.map { $0 ? "yes" : "no" } ?? "unknown")"
                 + (state.latencyMS.map { " · \($0) ms" } ?? ""),
             "Model server: \(srv.running ? "running" : "stopped")"
@@ -54,7 +54,7 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    LabeledContent("Mac", value: state.pairing?.name ?? "—")
+                    LabeledContent("Mac", value: state.macDisplayName)
                     LabeledContent("Address") {
                         Text(state.pairing?.url ?? "—")
                             .font(.caption.monospaced())

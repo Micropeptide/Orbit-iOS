@@ -88,7 +88,7 @@ struct ConnectionBanner: View {
                 HStack(spacing: 8) {
                     Image(systemName: "wifi.slash")
                     VStack(alignment: .leading, spacing: 1) {
-                        Text("Can't reach \(state.pairing?.name ?? "your Mac")")
+                        Text("Can't reach \(state.macDisplayName)")
                             .font(.footnote.weight(.semibold))
                         Text("Showing the last copy. It will catch up when the Mac is awake.")
                             .font(.caption2)
