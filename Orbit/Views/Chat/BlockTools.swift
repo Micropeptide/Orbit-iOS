@@ -4,6 +4,33 @@ import SwiftUI
 /// them (codeTools, tableTools): copy in several shapes, save as a file, wrap,
 /// format JSON, show CSV as a table, preview a page, sort a table, see it all.
 
+// ------------------------------------------------------------------ actions
+
+/// What a code block asks of the app: put text in the message box, show a
+/// toast. Handed down as one unchanging object rather than every block watching
+/// the whole app state, which redrew each block on every token of an answer.
+@MainActor
+final class BlockActions {
+    weak var state: AppState?
+
+    nonisolated init() {}
+
+    func insertInDraft(_ text: String) { state?.insertInDraft(text) }
+    func toast(_ text: String) { state?.toast(text) }
+}
+
+private struct BlockActionsKey: EnvironmentKey {
+    /// Unset (a share image, a preview) does nothing.
+    static let defaultValue = BlockActions()
+}
+
+extension EnvironmentValues {
+    var blockActions: BlockActions {
+        get { self[BlockActionsKey.self] }
+        set { self[BlockActionsKey.self] = newValue }
+    }
+}
+
 // ------------------------------------------------------------------ code
 
 struct CodeBlock: View {
@@ -11,7 +38,7 @@ struct CodeBlock: View {
     let code: String
     /// A block drawn inside a sheet already has all its lines.
     var collapsible = true
-    @EnvironmentObject private var state: AppState
+    @Environment(\.blockActions) private var actions
     @AppStorage("orbit.codeWrap") private var wrap = false
     @State private var copied = false
     @State private var expanded = false
@@ -125,7 +152,7 @@ struct CodeBlock: View {
     @ViewBuilder
     private var tools: some View {
         Button {
-            state.insertInDraft("\n```" + language + "\n" + code.trimmingCharacters(in: .newlines) + "\n```\n")
+            actions.insertInDraft("\n```" + language + "\n" + code.trimmingCharacters(in: .newlines) + "\n```\n")
         } label: { Label("Insert into message", systemImage: "text.insert") }
         Button { save() } label: { Label("Save as a file…", systemImage: "square.and.arrow.down") }
         Toggle(isOn: $wrap) { Label("Wrap long lines", systemImage: "text.word.spacing") }
@@ -161,7 +188,7 @@ struct CodeBlock: View {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let url = dir.appendingPathComponent("snippet.\(ext)")
         do { try Data(code.utf8).write(to: url, options: .atomic); shareURL = url }
-        catch { state.toast("Could not save it: \(error.localizedDescription)") }
+        catch { actions.toast("Could not save it: \(error.localizedDescription)") }
     }
 
     private func formatJSON() {
@@ -176,7 +203,7 @@ struct CodeBlock: View {
                 ? try code.split(separator: "\n").map { try pretty(String($0)) }.joined(separator: "\n")
                 : try pretty(code)
         } catch {
-            state.toast("Not valid JSON")
+            actions.toast("Not valid JSON")
         }
     }
 }
@@ -276,26 +303,75 @@ struct TableData {
     }
 }
 
+/// Work a table's rows cost once, kept across redraws: which columns are numbers
+/// (a Markdown parse and a pattern per cell) and the rows in the order picked.
+/// A class, so filling it while drawing does not ask for another draw.
+private final class TableCache {
+    private var rows: [[String]]?
+    private(set) var numeric: Set<Int> = []
+    private(set) var widths: [CGFloat] = []
+    private var sortKey: (column: Int?, ascending: Bool)?
+    private var sortedRows: [[String]] = []
+
+    /// Resets itself when the table's content changes (an answer still writing it).
+    private func use(_ new: [[String]], full: Bool) {
+        guard rows != new else { return }
+        rows = new
+        let data = TableData(rows: new)
+        numeric = data.numericColumns
+        widths = full ? Self.columnWidths(new) : []
+        sortKey = nil
+        sortedRows = new
+    }
+
+    func prepare(_ new: [[String]], full: Bool) -> TableCache {
+        use(new, full: full)
+        return self
+    }
+
+    func sorted(by column: Int?, ascending: Bool) -> [[String]] {
+        guard let rows else { return [] }
+        if let k = sortKey, k.column == column, k.ascending == ascending { return sortedRows }
+        sortKey = (column, ascending)
+        sortedRows = TableData(rows: rows).sorted(by: column, ascending: ascending)
+        return sortedRows
+    }
+
+    /// A lazy list has no grid to line columns up, so each gets a width from its
+    /// longest text among the first rows.
+    private static func columnWidths(_ rows: [[String]]) -> [CGFloat] {
+        let n = rows.first?.count ?? 0
+        var longest = Array(repeating: 0, count: n)
+        for row in rows.prefix(300) {
+            for (c, cell) in row.enumerated() where c < n {
+                longest[c] = max(longest[c], min(cell.count, 60))
+            }
+        }
+        return longest.map { min(320, max(44, CGFloat($0) * 8 + 8)) }
+    }
+}
+
 /// A Markdown table as a real grid: header, rule, rows; scrolls sideways when wide.
+/// In a sheet (`full`) it scrolls both ways and draws only the rows on screen.
 struct TableBlock: View {
     let rows: [[String]]
     var inline: (String) -> AttributedString = MarkdownText.attributed
     /// In a sheet: every row, and a filter.
     var full = false
-    @EnvironmentObject private var state: AppState
     @State private var sortColumn: Int?
     @State private var ascending = true
     @State private var showAll = false
     @State private var enlarged = false
     @State private var shareURL: URL?
     @State private var filter = ""
+    @State private var cache = TableCache()
 
     static let clipAt = 26
 
     var body: some View {
-        let data = TableData(rows: rows)
-        let numeric = data.numericColumns
-        var shownRows = data.sorted(by: sortColumn, ascending: ascending)
+        let prepared = cache.prepare(rows, full: full)
+        let numeric = prepared.numeric
+        var shownRows = prepared.sorted(by: sortColumn, ascending: ascending)
         let q = filter.trimmingCharacters(in: .whitespaces).lowercased()
         if full, !q.isEmpty, shownRows.count > 1 {
             shownRows = [shownRows[0]] + shownRows.dropFirst().filter { $0.joined(separator: " ").lowercased().contains(q) }
@@ -314,7 +390,7 @@ struct TableBlock: View {
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                 }
                 Spacer()
-                Menu { tools(data) } label: {
+                Menu { tools() } label: {
                     Image(systemName: "ellipsis.circle").font(.caption)
                 }
                 .foregroundStyle(.secondary)
@@ -322,20 +398,24 @@ struct TableBlock: View {
             }
             .padding(.horizontal, 4)
 
-            ScrollView(.horizontal, showsIndicators: true) {
-                Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 6) {
-                    ForEach(Array(visible.enumerated()), id: \.offset) { i, row in
-                        GridRow {
-                            ForEach(Array(row.enumerated()), id: \.offset) { c, cell in
-                                cellView(cell, header: i == 0, column: c, numeric: numeric.contains(c))
+            if full {
+                lazyTable(visible, numeric: numeric, widths: prepared.widths)
+            } else {
+                ScrollView(.horizontal, showsIndicators: true) {
+                    Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 6) {
+                        ForEach(Array(visible.enumerated()), id: \.offset) { i, row in
+                            GridRow {
+                                ForEach(Array(row.enumerated()), id: \.offset) { c, cell in
+                                    cellView(cell, header: i == 0, column: c, numeric: numeric.contains(c))
+                                }
                             }
+                            if i == 0 { Divider().gridCellUnsizedAxes(.horizontal) }
                         }
-                        if i == 0 { Divider().gridCellUnsizedAxes(.horizontal) }
                     }
+                    .padding(.horizontal, 12).padding(.vertical, 9)
                 }
-                .padding(.horizontal, 12).padding(.vertical, 9)
+                .background(.quaternary.opacity(0.28), in: .rect(cornerRadius: 10))
             }
-            .background(.quaternary.opacity(0.28), in: .rect(cornerRadius: 10))
 
             if !full && shownRows.count > Self.clipAt {
                 Button(showAll ? "Show fewer" : "Show all \(shownRows.count - 1) rows") {
@@ -347,6 +427,39 @@ struct TableBlock: View {
         }
         .sheet(isPresented: $enlarged) { TableSheet(title: "Table", rows: rows, inline: inline) }
         .sheet(item: $shareURL) { ActivityView(items: [$0]).ignoresSafeArea() }
+    }
+
+    /// Every row of a big table, drawn as it scrolls into view, the header kept on top.
+    private func lazyTable(_ visible: [[String]], numeric: Set<Int>, widths: [CGFloat]) -> some View {
+        func line(_ row: [String], header: Bool) -> some View {
+            HStack(alignment: .top, spacing: 16) {
+                ForEach(Array(row.enumerated()), id: \.offset) { c, cell in
+                    cellView(cell, header: header, column: c, numeric: numeric.contains(c))
+                        .frame(width: c < widths.count ? widths[c] : 120,
+                               alignment: numeric.contains(c) ? .trailing : .leading)
+                }
+            }
+        }
+        return ScrollView([.vertical, .horizontal]) {
+            LazyVStack(alignment: .leading, spacing: 6, pinnedViews: [.sectionHeaders]) {
+                Section {
+                    ForEach(Array(visible.dropFirst().enumerated()), id: \.offset) { _, row in
+                        line(row, header: false)
+                    }
+                } header: {
+                    if let head = visible.first {
+                        VStack(alignment: .leading, spacing: 6) {
+                            line(head, header: true)
+                            Divider()
+                        }
+                        .padding(.top, 9)
+                        .background(.background)
+                    }
+                }
+            }
+            .padding(.horizontal, 12).padding(.bottom, 9)
+        }
+        .background(.quaternary.opacity(0.28), in: .rect(cornerRadius: 10))
     }
 
     @ViewBuilder
@@ -378,7 +491,8 @@ struct TableBlock: View {
     }
 
     @ViewBuilder
-    private func tools(_ data: TableData) -> some View {
+    private func tools() -> some View {
+        let data = TableData(rows: rows)
         Menu {
             Button { copy(data.markdown) } label: { Text("Markdown") }
             Button { copy(data.csv) } label: { Text("CSV") }
@@ -431,12 +545,11 @@ struct TableSheet: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView(.vertical) {
-                TableBlock(rows: rows, inline: inline, full: true).padding()
-            }
-            .navigationTitle(title)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            // the table scrolls itself, so only the rows on screen are drawn
+            TableBlock(rows: rows, inline: inline, full: true).padding()
+                .navigationTitle(title)
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
         }
     }
 }

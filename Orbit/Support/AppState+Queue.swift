@@ -49,7 +49,16 @@ extension AppState {
     /// message. Draw the message it took, then follow its answer.
     func followQueue(after sid: String) async {
         guard let server else { return }
-        await loadQueue()
+        // The Mac frees the chat a moment before it starts the next message, so
+        // "not running" straight after an answer ends is not the last word: while
+        // messages still wait, look again for a few seconds.
+        for attempt in 0..<7 {
+            await loadQueue()
+            if queue.running == true { break }
+            guard attempt < 6, openChat?.sid == sid, !streaming, liveSid == nil,
+                  queue.items.contains(where: { !$0.isScheduled && queue.paused != true }) else { return }
+            try? await Task.sleep(nanoseconds: 500_000_000)
+        }
         guard queue.running == true, openChat?.sid == sid, !streaming, liveSid == nil else { return }
         guard let live = try? await server.liveUser(sid), live.running,
               openChat?.sid == sid, !streaming, liveSid == nil else { return }
@@ -187,7 +196,8 @@ extension AppState {
 
     /// Tell you about news in a chat: a notification when the app is in the
     /// background, a toast when you are in another chat, nothing when you are
-    /// looking at it. Chats you were not looking at keep a count until opened.
+    /// looking at it. Only news you did not see counts toward the badge: while
+    /// the app is away, or in a chat that is not on screen.
     func raise(_ kind: String, body: String, sid: String) {
         let looking = !backgrounded && openChat?.sid == sid
         guard !looking else { return }
@@ -215,6 +225,27 @@ extension AppState {
         syncBadge()
     }
 
+    /// Coming back to the app with a chat on screen is looking at its news: what
+    /// arrived there while the phone was locked no longer counts on the icon.
+    /// Called when the app becomes active.
+    func markOpenChatSeen() {
+        guard let sid = openChat?.sid else { syncBadge(); return }
+        if composerExtras.unseen[sid] != nil { markSeen(sid) } else { syncBadge() }
+    }
+
+    /// A chat that is gone has no news left to see: its count leaves the badge.
+    func forgetUnseen(_ sid: String) {
+        markSeen(sid)
+        composerExtras.lastRunning?.remove(sid)
+        composerExtras.lastWaiting?.remove(sid)
+    }
+
+    /// Unpairing: no counts, no badge, and nothing from the old Mac's poll.
+    func resetComposerExtras() {
+        composerExtras = ComposerExtras()
+        syncBadge()
+    }
+
     func unseenCount(for sid: String) -> Int { composerExtras.unseen[sid] ?? 0 }
 
     private func syncBadge() {
@@ -234,16 +265,20 @@ extension AppState {
             Task { [weak self] in
                 guard let self, let server = self.server else { return }
                 let p = try? await server.livePrompts(sid)
+                let title = self.chats.first { $0.id == sid }?.displayTitle ?? "A chat"
                 if let q = p?.question {
                     self.raise("Orbit has a question", body: q.question, sid: sid)
-                } else {
-                    let a = p?.approval
+                } else if let a = p?.approval {
                     self.raise("Needs your approval",
-                               body: a.map { $0.name + ($0.reason.isEmpty ? "" : " — " + $0.reason) } ?? "", sid: sid)
+                               body: a.name + (a.reason.isEmpty ? "" : " — " + a.reason), sid: sid)
+                } else {
+                    // the prompt could not be read: still say it is waiting, never an empty line
+                    self.raise("Waiting for you", body: "\(title) is waiting for your answer", sid: sid)
                 }
             }
         }
-        for sid in before.subtracting(running) where sid != followed && openChat?.sid != sid {
+        // `raise` leaves out the chat you are looking at, and counts one finished while you were away
+        for sid in before.subtracting(running) where sid != followed {
             raise("Answer ready", body: chats.first { $0.id == sid }?.displayTitle ?? "", sid: sid)
         }
     }

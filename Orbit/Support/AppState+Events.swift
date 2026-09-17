@@ -31,9 +31,41 @@ final class TranscriptExtras: ObservableObject {
     func dismissSkillHint(sid: String, turn: Int) {
         answers[sid]?[turn]?.skillHint = nil
     }
+
+    /// The answers from `turn` on are gone (rewound, retried, regenerated): what
+    /// came with them must not turn up under the answers that replace them.
+    func forget(sid: String, fromTurn turn: Int) {
+        guard let kept = answers[sid] else { return }
+        answers[sid] = kept.filter { $0.key < turn }
+        notes[sid] = nil
+        roundPending[sid] = nil
+    }
+}
+
+extension Message {
+    /// Pictures or phone-side files went with it, which "Retry from here" cannot
+    /// send again: it only has the words. (A workspace file the Mac noted as
+    /// "[attached file: …]" is in the words, so that one does go again.)
+    var hasUnsendableAttachments: Bool {
+        guard isUser else { return false }
+        if !(images ?? []).isEmpty { return true }
+        return text.split(separator: "\n").contains { $0.hasPrefix("📎 ") }
+    }
 }
 
 extension AppState {
+
+    /// Which turn a message of yours starts, counted as `liveTurn` counts them.
+    func turnOrdinal(of message: Message) -> Int? {
+        guard let i = messages.firstIndex(where: { $0.id == message.id }) else { return nil }
+        return messages[..<i].filter { $0.isUser && $0.note != true }.count
+    }
+
+    /// Drop the extras of every answer from this message of yours on.
+    func forgetExtras(from message: Message) {
+        guard let sid = openChat?.sid, let t = turnOrdinal(of: message) else { return }
+        TranscriptExtras.shared.forget(sid: sid, fromTurn: t)
+    }
 
     /// The turn a live answer belongs to: your latest real message.
     private var liveTurn: (turn: Int, prompt: String) {
@@ -101,8 +133,14 @@ extension AppState {
     func retry(from message: Message) async {
         guard let server, let sid = openChat?.sid, !streaming, message.isUser,
               let index = userIndex(of: message) else { return }
+        guard !message.hasUnsendableAttachments else {
+            toast("Its attachments can't be sent again — attach them to a new message")
+            return
+        }
+        let turn = turnOrdinal(of: message)
         do {
             _ = try await server.rewind(sid: sid, index: index, files: false)
+            if let turn { TranscriptExtras.shared.forget(sid: sid, fromTurn: turn) }
             await open(sid)
             await send(message.text)
         } catch { lastError = error.localizedDescription }
