@@ -15,6 +15,8 @@ struct ChatView: View {
     /// it off (dragging back up to read); rows changing height never do -- they used to
     /// leave the view parked past the end of a finished answer, which looked blank.
     @State private var following = true
+    /// Bumped by the "Latest" button, which lives in the composer, away from the scroll proxy.
+    @State private var scrollDownRequest = 0
     @EnvironmentObject var state: AppState
     @State private var draft = ""
     @State private var showModels = false
@@ -308,23 +310,7 @@ struct ChatView: View {
     .onChange(of: state.liveRuns.count + state.liveSteps.count) { _, _ in follow(proxy) }
     .onChange(of: state.chatExtras.question?.id) { _, _ in follow(proxy) }
     .onChange(of: state.chatExtras.approval?.id) { _, _ in follow(proxy) }
-    .overlay(alignment: .bottom) {
-        if !atBottom && (newBelow || state.streaming) {
-            Button {
-                following = true; scroll(proxy); newBelow = false
-            } label: {
-                Label(newBelow ? "New messages" : "Latest", systemImage: "arrow.down")
-                    .font(.footnote.weight(.semibold))
-                    .padding(.horizontal, 12).padding(.vertical, 7)
-                    .background(.regularMaterial, in: Capsule())
-                    .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
-            }
-            .buttonStyle(.plain)
-            .padding(.bottom, 10)
-            .transition(.opacity)
-            .accessibilityHint("Scrolls to the newest message")
-        }
-    }
+    .onChange(of: scrollDownRequest) { _, _ in following = true; newBelow = false; scroll(proxy) }
     }
 
     /// Keeps up with a growing answer only while you are at the bottom; otherwise marks
@@ -511,6 +497,25 @@ struct ChatView: View {
 
     private var composer: some View {
         VStack(spacing: 0) {
+            // back to the newest message: sits on top of the box, where the scroll view's own
+            // bottom edge (behind the box) would hide it
+            if !atBottom && (newBelow || state.streaming) {
+                Button {
+                    scrollDownRequest += 1
+                } label: {
+                    Label(newBelow ? "New messages" : "Latest", systemImage: "arrow.down")
+                        .font(.footnote.weight(.semibold))
+                        .padding(.horizontal, 12).padding(.vertical, 7)
+                        .background(.regularMaterial, in: Capsule())
+                        .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
+                }
+                .buttonStyle(.plain)
+                .padding(.vertical, 6)
+                .frame(maxWidth: .infinity)
+                .background(Color(uiColor: .systemBackground).opacity(0.001))
+                .transition(.opacity)
+                .accessibilityHint("Scrolls to the newest message")
+            }
             TodoDock(sid: sid)
             AnswerStatusLine(sid: sid)
             Composer(draft: $draft, typing: $typing, modelName: currentModelName,
