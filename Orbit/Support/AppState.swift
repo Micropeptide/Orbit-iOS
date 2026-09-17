@@ -156,6 +156,7 @@ final class AppState: ObservableObject {
 
     func unpair() {
         detachLive()
+        resetComposerExtras()
         watchTask?.cancel(); watchTask = nil
         Keychain.clear()
         Cache.clear()
@@ -251,7 +252,7 @@ final class AppState: ObservableObject {
     /// phone has is a network host name ("vpn-172-27-…", an IP address).
     var macDisplayName: String {
         guard let raw = pairing?.name, !raw.isEmpty else { return "your Mac" }
-        if raw.range(of: #"\d+[-.]\d+"#, options: .regularExpression) != nil { return "your Mac" }
+        if raw.range(of: #"^\S*\d+[-.]\d+\S*$"#, options: .regularExpression) != nil { return "your Mac" }
         return raw
     }
 
@@ -798,6 +799,7 @@ final class AppState: ObservableObject {
     func delete(_ id: String) async {
         guard let server else { return }
         try? await server.delete(id)
+        forgetUnseen(id)
         if liveSid == id { detachLive() }
         chats.removeAll { $0.id == id }
         Cache.saveChats(chats)
@@ -912,6 +914,7 @@ final class AppState: ObservableObject {
     func editAndResend(_ message: Message) async {
         guard let server, let sid = openChat?.sid, message.isUser,
               let ord = userOrdinal(of: message) else { return }
+        forgetExtras(from: message)
         do {
             try await server.truncate(sid, atUserIndex: ord, check: message.text)
             await open(sid)
@@ -923,6 +926,7 @@ final class AppState: ObservableObject {
     func regenerate() async {
         guard let last = messages.last(where: \.isUser) else { return }
         guard let server, let sid = openChat?.sid, let ord = userOrdinal(of: last) else { return }
+        forgetExtras(from: last)
         do {
             try await server.truncate(sid, atUserIndex: ord, check: last.text)
             await open(sid)
