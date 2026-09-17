@@ -310,11 +310,22 @@ struct DiffView: View {
 struct ContinueCard: View {
     let reason: String
     @EnvironmentObject var state: AppState
+    @ObservedObject private var extras = TranscriptExtras.shared
 
     var body: some View {
         CardChrome(tint: .blue) {
             Label("The answer \(reason) without finishing", systemImage: "pause.circle")
                 .font(.callout)
+            // the plan steps it had not reached
+            if let sid = state.openChat?.sid, let pending = extras.roundPending[sid], !pending.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("still outstanding:").font(.caption).foregroundStyle(.secondary)
+                    ForEach(Array(pending.enumerated()), id: \.offset) { _, t in
+                        Text("• " + t).font(.caption).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
             HStack {
                 Button("Continue") { Task { await state.continueAnswer() } }
                     .buttonStyle(.borderedProminent)

@@ -497,6 +497,7 @@ final class AppState: ObservableObject {
             pendingApproval = (a.name, a.reason, a.id)
         case .roundLimit(let why): chatExtras.roundLimit = why
         case .error(let e):    lastError = e
+        case .extra(let e):    applyExtra(e)
         case .end(_, let title):
             if let title, var c = openChat {
                 c.title = title
