@@ -15,6 +15,10 @@ final class FileLinks: ObservableObject {
     @Published private(set) var resolved: [String: [String: ResolvedPath]] = [:]
     /// The file whose preview is showing.
     @Published var presenting: FilePreviewTarget?
+    /// A path an answer named that is not there: find files with its name instead.
+    @Published var missing: FilePreviewTarget?
+    /// The folder each chat works in, as the Mac last said, for relative paths.
+    @Published private(set) var cwd: [String: String] = [:]
 
     private var asked: [String: [String: Date]] = [:]
     private var pending: [String: Set<String>] = [:]
@@ -53,10 +57,11 @@ final class FileLinks: ObservableObject {
             let all = Array(names)
             for start in stride(from: 0, to: all.count, by: 250) {
                 let chunk = Array(all[start..<min(all.count, start + 250)])
-                guard let found = try? await server.resolvePaths(sid: sid, chunk) else { continue }
+                guard let r = try? await server.resolvePathsWithFolder(sid: sid, chunk) else { continue }
                 var map = resolved[sid] ?? [:]
-                for (k, v) in found { map[k] = v }
+                for (k, v) in r.items { map[k] = v }
                 resolved[sid] = map
+                if let c = r.cwd, cwd[sid] != c { cwd[sid] = c }
             }
         }
     }
@@ -66,10 +71,47 @@ final class FileLinks: ObservableObject {
         guard url.scheme == Self.scheme,
               let name = URLComponents(url: url, resolvingAgainstBaseURL: false)?
                 .queryItems?.first(where: { $0.name == "n" })?.value,
-              let info = info(sid: sid, name: name), info.exists else { return false }
+              let info = info(sid: sid, name: name) else { return false }
         Haptics.tap()
-        presenting = FilePreviewTarget(sid: sid, info: info)
+        if info.exists { presenting = FilePreviewTarget(sid: sid, info: info) }
+        else { missing = FilePreviewTarget(sid: sid, info: info) }
         return true
+    }
+
+    /// Look these names up now and wait for the answer (cached ones are not asked again).
+    func resolveNow(sid: String, names: [String]) async -> [String: ResolvedPath] {
+        let known = resolved[sid] ?? [:]
+        let need = Array(Set(names.filter { known[$0] == nil }))
+        if let server, !need.isEmpty {
+            for start in stride(from: 0, to: need.count, by: 250) {
+                let chunk = Array(need[start..<min(need.count, start + 250)])
+                guard let r = try? await server.resolvePathsWithFolder(sid: sid, chunk) else { continue }
+                var map = resolved[sid] ?? [:]
+                for (k, v) in r.items { map[k] = v; asked[sid, default: [:]][k] = Date() }
+                resolved[sid] = map
+                if let c = r.cwd, cwd[sid] != c { cwd[sid] = c }
+            }
+        }
+        return resolved[sid] ?? [:]
+    }
+
+    /// A path relative to the chat's folder, when it is inside it.
+    func relative(_ path: String, sid: String) -> String {
+        guard let c = cwd[sid], path.hasPrefix(c + "/") else { return path }
+        return String(path.dropFirst(c.count + 1))
+    }
+
+    /// The file names one message mentions, plus the files its tool calls wrote.
+    static func names(in m: Message) -> [String] {
+        var out: [String] = []
+        if !m.text.isEmpty {
+            out = MarkdownText.Block.parse(m.text).flatMap(\.inlineTexts)
+                .flatMap { candidates(in: MarkdownText.attributed($0)) }
+        }
+        for r in m.tool_runs ?? [] where ["Write", "Update", "Edit notebook"].contains(r.display) {
+            if let p = r.args["file_path"] ?? r.args["notebook_path"] ?? r.args["path"], !p.isEmpty { out.append(p) }
+        }
+        return out
     }
 
     static func link(for name: String) -> URL? {
@@ -162,9 +204,16 @@ final class FileLinks: ObservableObject {
             case .web(let u):
                 out[range].link = u
             case .file(let name):
-                guard let sid, resolved[sid]?[name]?.exists == true, let u = Self.link(for: name) else { continue }
-                out[range].link = u
-                out[range].underlineStyle = .single
+                guard let sid, let info = resolved[sid]?[name], let u = Self.link(for: name) else { continue }
+                if info.exists {
+                    out[range].link = u
+                    out[range].underlineStyle = .single
+                } else if name.hasPrefix("/") || name.hasPrefix("~") {
+                    // a full path that is not there: still tappable, to find files with its name
+                    out[range].link = u
+                    out[range].strikethroughStyle = .single
+                    out[range].foregroundColor = .secondary
+                }
             }
         }
         return out

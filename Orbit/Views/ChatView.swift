@@ -153,16 +153,19 @@ struct ChatView: View {
                         .padding(.top, 80).padding(.horizontal, 24)
                     }
                     let rows = transcriptRows
+                    let turns = TranscriptRow.turns(state.messages)
                     ForEach(rows) { row in
                         let i = row.index
                         let m = row.message
+                        let t = i < turns.count && turns[i].ends ? turns[i] : nil
                         MessageBubble(message: m,
                                       isLast: row.id == rows.last?.id,
                                       onEdit: { msg in Task { await state.editAndResend(msg) } },
                                       onRegenerate: { actionsModel.confirmRegenerate = false },
                                       onQuote: { msg in quote(msg) },
                                       actions: actionsModel.actions(state),
-                                      showByline: row.showByline)
+                                      showByline: row.showByline,
+                                      turn: t.map { ($0.turn, $0.prompt) })
                             .id(m.id)
                             .padding(.top, row.joinsPrevious ? -12 : 0)
                             .padding(.horizontal, flashed == i ? 8 : 0)
@@ -311,6 +314,7 @@ struct ChatView: View {
         case "/context":     actionsModel.showContext = true
         case "/copy":        state.copyAnswer(Int(rest) ?? 1)
         case "/diff":        actionsModel.showDiffs = true
+        case "/files":       actionsModel.showFiles = true
         case "/verbose":
             verboseTools.toggle()
             state.toast(verboseTools ? "Showing every tool call in full" : "Tool calls folded again")
@@ -387,6 +391,7 @@ struct ChatView: View {
                 if !state.liveText.isEmpty { MarkdownText(state.liveText) }
                 ForEach(state.liveTools, id: \.self) { ToolLine(text: $0) }
                 if !state.liveRuns.isEmpty { ToolRunsView(runs: state.liveRuns) }
+                LiveTurnExtras()
 
                 if !state.liveThinking.isEmpty {
                     ThinkingBlock(text: state.liveThinking,

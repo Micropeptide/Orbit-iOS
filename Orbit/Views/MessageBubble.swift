@@ -10,7 +10,12 @@ struct MessageBubble: View {
     var actions: MessageActions? = nil
     /// One answer, one block: only its first step names the model.
     var showByline = true
+    /// Which of your messages this answers, when it is the last step of that
+    /// answer: the sources, hooks and notices that came with it are drawn under it.
+    var turn: (index: Int, prompt: String)? = nil
     @State private var shareImage: ShareImage?
+    @State private var quoting: String?
+    @Environment(\.fileLinkSid) private var linkSid
 
     /// Uploaded images come back as data: URLs, which UIImage cannot read directly.
     static func decodeDataURL(_ s: String) -> Data? {
@@ -43,6 +48,9 @@ struct MessageBubble: View {
                         } label: { Label("Copy", systemImage: "doc.on.doc") }
                         if let onQuote {
                             Button { onQuote(message) } label: { Label("Quote", systemImage: "text.quote") }
+                            Button { quoting = message.text } label: {
+                                Label("Quote a part…", systemImage: "text.quote")
+                            }
                         }
                         if let onEdit {
                             Button { onEdit(message) } label: {
@@ -53,8 +61,7 @@ struct MessageBubble: View {
                     }
             }
             if message.note == true {
-                Text("sent while it was working")
-                    .font(.caption2).foregroundStyle(.secondary)
+                NoteReadState(sid: linkSid, text: message.text)
             }
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
@@ -71,6 +78,8 @@ struct MessageBubble: View {
                 if let thinking = message.thinking, !thinking.isEmpty {
                     ThinkingBlock(text: thinking, secs: message.thoughtFor)
                 }
+                AnswerFileStrip(message: message)
+                if let turn { TurnExtras(sid: linkSid, turn: turn.index, prompt: turn.prompt) }
                 AnswerFooter(message: message, actions: actions)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -86,6 +95,9 @@ struct MessageBubble: View {
                 }
                 if let onQuote {
                     Button { onQuote(message) } label: { Label("Quote", systemImage: "text.quote") }
+                    Button { quoting = message.text } label: {
+                        Label("Quote a part…", systemImage: "text.quote")
+                    }
                 }
                 if isLast, let onRegenerate {
                     Button { onRegenerate() } label: {
@@ -97,6 +109,9 @@ struct MessageBubble: View {
         }
         }
         .sheet(item: $shareImage) { ActivityView(items: [$0.image]).ignoresSafeArea() }
+        .sheet(isPresented: Binding(get: { quoting != nil }, set: { if !$0 { quoting = nil } })) {
+            QuotePartSheet(text: quoting ?? "")
+        }
     }
 
     /// With tool rows to show, the saved list of tool names says nothing new;
@@ -189,10 +204,12 @@ struct MarkdownText: View {
     @ViewBuilder
     private func view(for block: Block) -> some View {
         switch block {
+        // a live answer (no sid) keeps the source: its diagram or formula is still arriving
         case .code(let language, let code):
-            CodeBlock(language: language, code: code)
+            if sid != nil, language.lowercased() == "mermaid" { MermaidBlock(source: code) }
+            else { CodeBlock(language: language, code: code) }
         case .math(let tex):
-            CodeBlock(language: "math", code: tex)
+            if sid != nil { MathBlock(tex: tex) } else { CodeBlock(language: "math", code: tex) }
         case .table(let rows):
             TableBlock(rows: rows, inline: inline)
         case .text(let markdown):
@@ -520,73 +537,5 @@ struct QuoteBlock<Content: View>: View {
         }
         .fixedSize(horizontal: false, vertical: true)
         .background(kind == nil ? Color.clear : tint.opacity(0.07), in: .rect(cornerRadius: 8))
-    }
-}
-
-/// A Markdown table as a real grid: header, rule, rows; scrolls sideways when wide.
-struct TableBlock: View {
-    let rows: [[String]]
-    var inline: (String) -> AttributedString = MarkdownText.attributed
-
-    var body: some View {
-        ScrollView(.horizontal, showsIndicators: true) {
-            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 6) {
-                ForEach(Array(rows.enumerated()), id: \.offset) { i, row in
-                    GridRow {
-                        ForEach(Array(row.enumerated()), id: \.offset) { _, cell in
-                            Text(inline(cell))
-                                .font(i == 0 ? .subheadline.weight(.semibold) : .subheadline)
-                                .frame(maxWidth: 320, alignment: .leading)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .textSelection(.enabled)
-                        }
-                    }
-                    if i == 0 { Divider().gridCellUnsizedAxes(.horizontal) }
-                }
-            }
-            .padding(.horizontal, 12).padding(.vertical, 9)
-        }
-        .background(.quaternary.opacity(0.28), in: .rect(cornerRadius: 10))
-    }
-}
-
-struct CodeBlock: View {
-    let language: String
-    let code: String
-    @State private var copied = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text(language.isEmpty ? "code" : language)
-                    .font(.caption2.smallCaps()).foregroundStyle(.secondary)
-                Spacer()
-                Button {
-                    UIPasteboard.general.string = code
-                    withAnimation { copied = true }
-                    Haptics.success()
-                    Task {
-                        try? await Task.sleep(nanoseconds: 1_500_000_000)
-                        withAnimation { copied = false }
-                    }
-                } label: {
-                    Label(copied ? "Copied" : "Copy",
-                          systemImage: copied ? "checkmark" : "doc.on.doc")
-                        .font(.caption2)
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-            }
-            .padding(.horizontal, 11).padding(.vertical, 6)
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                Text(code)
-                    .font(.system(.caption, design: .monospaced))
-                    .textSelection(.enabled)
-                    .padding(.horizontal, 11)
-                    .padding(.bottom, 10)
-            }
-        }
-        .background(.quaternary.opacity(0.35), in: .rect(cornerRadius: 10))
     }
 }
