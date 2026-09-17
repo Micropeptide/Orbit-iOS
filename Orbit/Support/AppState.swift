@@ -249,7 +249,7 @@ final class AppState: ObservableObject {
     }
 
     /// The Mac, the way to name it on screen: its own name, or "your Mac" when all the
-    /// phone has is a network host name ("vpn-172-27-…", an IP address).
+    /// phone has is a network host name ("vpn-10-0-0-1…", an IP address).
     var macDisplayName: String {
         guard let raw = pairing?.name, !raw.isEmpty else { return "your Mac" }
         if raw.range(of: #"^\S*\d+[-.]\d+\S*$"#, options: .regularExpression) != nil { return "your Mac" }
