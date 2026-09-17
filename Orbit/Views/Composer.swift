@@ -71,6 +71,7 @@ struct Composer: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Model: \(modelName). Tap to change.")
+            OffpeakBadge()
             if canSend && !state.streaming {
                 Button { showLater = true } label: {
                     HStack(spacing: 4) {
