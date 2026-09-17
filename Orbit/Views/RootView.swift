@@ -4,8 +4,9 @@ struct RootView: View {
     @EnvironmentObject var state: AppState
     @Environment(\.horizontalSizeClass) private var width
     @AppStorage("theme") private var theme = "system"
+    @State private var showSample = false
 
-    /// Development only: `ORBIT_TAB=files|settings` opens on that tab so the
+    /// Development only: `ORBIT_TAB=scheduled|files|settings` opens on that tab so the
     /// simulator can be screenshotted without a finger. Compiled out of release.
     private static var initialTab: String {
         #if DEBUG
@@ -29,6 +30,9 @@ struct RootView: View {
                     }
                     .tabItem { Label("Chats", systemImage: "bubble.left.and.bubble.right") }
                     .tag("chats")
+                    ScheduledView()
+                        .tabItem { Label("Scheduled", systemImage: "clock") }
+                        .tag("scheduled")
                     FilesView()
                         .tabItem { Label("Files", systemImage: "folder") }
                         .tag("files")
@@ -43,7 +47,15 @@ struct RootView: View {
         .animation(.default, value: state.isPaired)
         }
         .preferredColorScheme(Appearance.scheme(theme))
-        .onAppear { state.tab = Self.initialTab }
+        .onAppear {
+            state.tab = Self.initialTab
+            #if DEBUG
+            showSample = MarkdownSample.wanted
+            #endif
+        }
+        #if DEBUG
+        .sheet(isPresented: $showSample) { MarkdownSample() }
+        #endif
     }
 }
 
@@ -75,3 +87,67 @@ struct ConnectionBanner: View {
         }
     }
 }
+
+#if DEBUG
+/// Development only: `ORBIT_MARKDOWN_SAMPLE=1` opens a sheet rendering every
+/// Markdown form an answer can use, so the renderer can be checked in the
+/// simulator without sending anything. `ORBIT_SAMPLE_SID` names the chat file
+/// names are looked up in; `ORBIT_SAMPLE_PATH` adds one path to the sample.
+struct MarkdownSample: View {
+    static var wanted: Bool { ProcessInfo.processInfo.environment["ORBIT_MARKDOWN_SAMPLE"] != nil }
+    @EnvironmentObject var state: AppState
+    @ObservedObject private var links = FileLinks.shared
+
+    private var text: String {
+        let path = ProcessInfo.processInfo.environment["ORBIT_SAMPLE_PATH"] ?? "README.md"
+        return """
+        # Heading one
+        ## Heading two
+        Some **bold**, *italic*, ~~struck~~ and `inline code`, a [link](https://example.com) and https://example.org.
+
+        > [!NOTE]
+        > Callouts render with a title and a coloured bar.
+
+        > [!WARNING] Careful
+        > A warning with its own title.
+
+        > A plain quote.
+
+        - [x] a finished task
+        - [ ] an open task
+        - a bullet
+          - a nested bullet
+        1. first
+        2. second
+
+        | Column | Another wide column | Third column that is quite long | Fourth |
+        |---|---|---|---|
+        | a | `b` | c | d |
+        | 1 | 2 | 3 | 4 |
+
+        ```python
+        print("hello")
+        ```
+
+        $$
+        E = mc^2
+        $$
+
+        ---
+        The file is `\(path)`.
+        """
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                MarkdownText(text).padding()
+            }
+            .environment(\.fileLinkSid, ProcessInfo.processInfo.environment["ORBIT_SAMPLE_SID"])
+            .navigationTitle("Markdown sample")
+            .navigationBarTitleDisplayMode(.inline)
+            .sheet(item: $links.presenting) { FilePreviewSheet(target: $0) }
+        }
+    }
+}
+#endif

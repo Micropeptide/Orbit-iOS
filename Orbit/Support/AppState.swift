@@ -78,6 +78,7 @@ final class AppState: ObservableObject {
         } else {
             server = nil
         }
+        FileLinks.shared.server = server
     }
 
     var isPaired: Bool { pairing != nil }
@@ -118,7 +119,7 @@ final class AppState: ObservableObject {
         Keychain.clear()
         Cache.clear()
         pairing = nil
-        chats = []; messages = []; openChat = nil; reachable = nil
+        chats = []; messages = []; openChat = nil; reachable = nil; queue = .empty
         models = []; projects = []; attachments = []
         currentModel = nil; defaultModel = nil; deepLink = nil
         localServer = LocalServer()
@@ -259,6 +260,7 @@ final class AppState: ObservableObject {
             // leave the old answer running on the Mac; just stop watching it here
             detachLive()
         }
+        if openChat?.sid != id { queue = .empty }
         // show the cached copy immediately; the network fills it in
         if let cached = Cache.loadMessages(id), !cached.isEmpty {
             messages = cached
@@ -281,6 +283,7 @@ final class AppState: ObservableObject {
             // already attached (SSE or poll) when it is the chat we are watching
             if d.running == true, liveSid != id { await rejoin(id) }
             watch(id, loaded: d.n)
+            await loadQueue()
         } catch {
             lastError = error.localizedDescription
         }
@@ -310,6 +313,8 @@ final class AppState: ObservableObject {
                     }
                     Task { await self.loadChats() }
                 }
+                // a waiting message may have gone out, or been added on the Mac
+                if s.n != self.watchedCount || !(self.queue.items.isEmpty) { await self.loadQueue() }
                 self.watchedCount = s.n
             }
         }
@@ -408,6 +413,7 @@ final class AppState: ObservableObject {
         case .autoApproved(let n, let r): liveTools.append("✓ auto-approved \(n) — \(r)")
         case .approval(let n, let r, let id):
             pendingApproval = (n, r, id ?? "")
+        case .notice(let n):   liveTools.append("↪ " + n)
         case .error(let e):    lastError = e
         case .end(_, let title):
             if let title, var c = openChat {
@@ -463,7 +469,7 @@ final class AppState: ObservableObject {
         if !answered.isEmpty {
             notifyIfBackgrounded(title: openChat?.title ?? "Orbit", body: answered, sid: sid)
         }
-        Task { await loadChats() }
+        Task { await loadChats(); await loadQueue() }
     }
 
     /// Reconnect to an answer already running on the Mac.
@@ -597,6 +603,56 @@ final class AppState: ObservableObject {
             out.append("")
         }
         return out.joined(separator: "\n")
+    }
+
+    // ------------------------------------------------------------ queue
+
+    /// The open chat's waiting messages: queued behind a running answer, or
+    /// scheduled for later.
+    @Published var queue: QueueState = .empty
+
+    func loadQueue() async {
+        guard let server, let sid = openChat?.sid else { queue = .empty; return }
+        if let q = try? await server.queue(sid: sid, op: "get"), openChat?.sid == sid { queue = q }
+    }
+
+    /// Send the draft (and anything attached) at a later time.
+    func sendLater(_ text: String, at: Date, repeat rep: Repeat) async -> Bool {
+        guard let server, let sid = openChat?.sid,
+              !(text.isEmpty && attachments.isEmpty) else { return false }
+        do {
+            queue = try await server.sendLater(sid: sid, text: text,
+                                               attachments: attachments.map(\.payload),
+                                               at: at, repeat: rep)
+            attachments = []
+            return true
+        } catch {
+            lastError = error.localizedDescription
+            return false
+        }
+    }
+
+    /// `now`, `remove`, `order` and friends on the open chat's queue.
+    func queueOp(_ op: String, _ extra: [String: Any] = [:]) async {
+        guard let server, let sid = openChat?.sid else { return }
+        do {
+            queue = try await server.queue(sid: sid, op: op, extra)
+            // sending one now may have started an answer: pick it up
+            if op == "now" {
+                try? await Task.sleep(nanoseconds: 600_000_000)
+                if !streaming, (try? await server.live(sid).running) == true { await rejoin(sid) }
+            }
+        } catch { lastError = error.localizedDescription }
+    }
+
+    func updateQueued(_ item: QueueItem, text: String?, at: Date??, repeat rep: Repeat?,
+                      model: String?) async {
+        guard let server, let sid = openChat?.sid else { return }
+        do {
+            try await server.updateQueued(sid: sid, id: item.id, text: text, at: at,
+                                          repeat: rep, model: model)
+        } catch { lastError = error.localizedDescription }
+        await loadQueue()
     }
 
     /// Text the composer should pick up — set by "edit and resend".
