@@ -36,7 +36,10 @@ struct OrbitApp: App {
                         // coming back from the lock screen should show the truth,
                         // not whatever was on screen twenty minutes ago
                         state.endBackgroundGrace()
-                        Task { await state.refreshEverything() }
+                        Task {
+                            await state.refreshEverything()
+                            await state.resyncLive()      // the stream rarely survives the lock screen
+                        }
                     case .background:
                         // hold the app awake briefly so an answer in flight can
                         // finish and announce itself

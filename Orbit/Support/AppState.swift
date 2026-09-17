@@ -345,7 +345,13 @@ final class AppState: ObservableObject {
                 guard let self, !Task.isCancelled, self.openChat?.sid == id,
                       !self.backgrounded, let server = self.server else { continue }
                 guard let s = try? await server.stamp(id) else { continue }
-                if self.streaming { self.watchedCount = s.n; continue }   // our own turn moves it
+                if self.streaming {
+                    self.watchedCount = s.n                                  // our own turn moves it
+                    if s.running, self.streamTask != nil, Date().timeIntervalSince(self.lastLiveEvent) > 25 {
+                        await self.resyncLive()
+                    }
+                    continue
+                }
                 if s.running, self.liveSid == nil {
                     await self.rejoin(id)                                   // someone else's turn
                 } else if let seen = self.watchedCount, s.n != seen {
@@ -393,6 +399,7 @@ final class AppState: ObservableObject {
                     apply(ev)
                 }
             } catch {
+                if Task.isCancelled { return }       // handed over to polling, stopped, or left
                 // A dropped connection is not a failed answer: the Mac carries on.
                 // Rejoin through the live buffer rather than reporting an error.
                 if liveSid == sid, (try? await server.live(sid).running) == true {
@@ -402,6 +409,7 @@ final class AppState: ObservableObject {
                     liveStatus = ""
                 }
             }
+            if Task.isCancelled { return }
             if dropped { await rejoin(sid) }
             else if liveSid == sid {
                 let failed = lastError != nil
@@ -414,6 +422,24 @@ final class AppState: ObservableObject {
 
     /// Which chat the live buffer belongs to. Events for any other chat are ignored.
     private(set) var liveSid: String?
+    /// When the answer last showed a sign of life (a stream event or a poll), so a stream
+    /// that hangs without failing -- a phone that slept, a network that changed -- is noticed.
+    var lastLiveEvent = Date()
+
+    /// Stop reading the stream and follow the answer by polling the Mac instead: for a
+    /// stream that went quiet while the Mac still answers, and after coming back from the
+    /// background, where the stream has usually died without saying so.
+    func resyncLive() async {
+        guard let server, streaming, let sid = liveSid else { return }
+        guard (try? await server.liveDetail(sid).running) == true else {
+            // it finished while we were not listening: show what it wrote
+            finishLive(sid: sid)
+            await open(sid)
+            return
+        }
+        streamTask?.cancel(); streamTask = nil
+        await rejoin(sid)
+    }
     private var pendingText = ""
     private var flushTask: Task<Void, Never>?
 
@@ -453,6 +479,7 @@ final class AppState: ObservableObject {
     }
 
     private func apply(_ ev: StreamEvent) {
+        lastLiveEvent = Date()
         switch ev {
         case .content(let t):
             nextStep()
@@ -606,8 +633,17 @@ final class AppState: ObservableObject {
         pollTask?.cancel()
         pollTask = Task {
             var step: Int? = nil
+            var misses = 0
             while !Task.isCancelled, liveSid == sid {
-                guard let s = try? await server.live(sid) else { break }
+                // one failed poll (a phone between networks) is not the end of the answer
+                guard let s = try? await server.liveDetail(sid) else {
+                    misses += 1
+                    if misses >= 8 { break }
+                    try? await Task.sleep(nanoseconds: 1_500_000_000)
+                    continue
+                }
+                misses = 0
+                lastLiveEvent = Date()
                 // The Mac keeps only the step being written. When it moves on,
                 // the finished step is in the saved chat: read that again, or
                 // its text would vanish from the screen until the answer ends.
@@ -619,6 +655,10 @@ final class AppState: ObservableObject {
                 await pickUpPrompts(sid)            // a question or approval raised elsewhere
                 liveText = s.content
                 liveThinking = s.thinking
+                // the calls this step has made so far: without them a Claude Code answer
+                // busy running tools looked frozen
+                liveRuns = s.tools.map { ToolRun(event: $0, finished: $0["ok"] != nil && !($0["ok"] is NSNull)) }
+                if s.content.isEmpty, !s.status.isEmpty { liveStatus = s.status }
                 liveChars = max(liveChars, s.content.count + s.thinking.count)
                 if s.content.isEmpty, !s.thinking.isEmpty {
                     if liveThinkingSince == nil { liveThinkingSince = Date() }
