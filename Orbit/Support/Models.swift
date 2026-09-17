@@ -25,6 +25,13 @@ struct ChatSummary: Identifiable, Codable, Hashable {
     // chat list status: messages waiting in its queue, the next scheduled one
     var queued: Int?
     var scheduled: Double?
+    // a session another agent began (Claude Code, Codex, OpenCode), where it
+    // works, the SSH host it runs on, and its model
+    var external: Bool?
+    var source: String?
+    var cwd: String?
+    var host: String?
+    var model: String?
 
     var displayTitle: String { (title?.isEmpty == false ? title! : "New chat") }
     var date: Date { Date(timeIntervalSince1970: mtime) }
@@ -32,6 +39,7 @@ struct ChatSummary: Identifiable, Codable, Hashable {
     enum CodingKeys: String, CodingKey {
         case id, title, n, mtime, pinned, archived, project, tags
         case queued, scheduled
+        case external, source, cwd, host, model
     }
 
     init(from d: Decoder) throws {
@@ -46,6 +54,11 @@ struct ChatSummary: Identifiable, Codable, Hashable {
         tags = try? c.decode([String].self, forKey: .tags)
         queued = c.lenientDouble(.queued).map { Int($0) }
         scheduled = c.lenientDouble(.scheduled)
+        external = c.lenientBool(.external)
+        source = try? c.decode(String.self, forKey: .source)
+        cwd = try? c.decode(String.self, forKey: .cwd)
+        host = (try? c.decode(String.self, forKey: .host)).flatMap { $0.isEmpty ? nil : $0 }
+        model = try? c.decode(String.self, forKey: .model)
     }
 }
 
@@ -481,10 +494,17 @@ struct ScheduledTask: Identifiable, Codable, Hashable {
     var next_ts: Double?
     /// Older Macs describe the next run as text ("09:00 Mon") instead.
     var next: String?
+    /// "limit_resume": a one-off the Mac made itself, to carry a chat on once a
+    /// used-up plan allowance resets. `why` is the line that said so; `attempt`
+    /// counts how many times in a row that chat met the limit.
+    var kind: String?
+    var why: String?
+    var attempt: Int?
 
     enum CodingKeys: String, CodingKey {
         case id, name, prompt, every, at, at_ts, n, weekday, stop_at, model, agent, sid, project,
              enabled, last_run, last_ok, last_result, last_sid, next_ts, next
+        case kind, why, attempt
     }
 
     init(from d: Decoder) throws {
@@ -509,6 +529,9 @@ struct ScheduledTask: Identifiable, Codable, Hashable {
         last_sid = try? c.decode(String.self, forKey: .last_sid)
         next_ts = c.lenientDouble(.next_ts)
         next = try? c.decode(String.self, forKey: .next)
+        kind = try? c.decode(String.self, forKey: .kind)
+        why = try? c.decode(String.self, forKey: .why)
+        attempt = c.lenientDouble(.attempt).map { Int($0) }
     }
 
     init(new: Void = ()) {
