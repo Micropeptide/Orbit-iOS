@@ -18,10 +18,8 @@ struct Composer: View {
         ("/new", "start a new chat"), ("/model", "change the model"),
         ("/compact", "compact the history"), ("/find", "find in this chat"),
     ]
-    private var commandHints: [(String, String)] {
-        guard draft.hasPrefix("/"), !draft.contains(" ") else { return [] }
-        return Self.commands.filter { $0.0.hasPrefix(draft.lowercased()) }
-    }
+    /// Library: the "/" menu (commands, saved prompts, Claude's commands) and what it opens.
+    @StateObject private var slash = SlashController()
 
     @State private var showAttachMenu = false
     @State private var showLibrary = false
@@ -70,7 +68,7 @@ struct Composer: View {
             }
             .padding(.top, 6)
             if !state.attachments.isEmpty || state.uploading { attachmentStrip }
-            if !commandHints.isEmpty { commandStrip }
+            SlashMenu(draft: $draft, controller: slash, builtins: Self.commands, onCommand: onCommand)
             HStack(alignment: .bottom, spacing: 8) {
                 Button {
                     Haptics.tap()
@@ -123,6 +121,10 @@ struct Composer: View {
                         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
                         draft = ""
                         Haptics.tap()
+                        if text.hasPrefix("/"), let replaced = slash.intercept(text, state: state) {
+                            draft = replaced      // a saved prompt expands in place; a Library command ran
+                            return
+                        }
                         if text.hasPrefix("/"), onCommand?(text) == true { return }
                         Task { await state.send(text) }
                     } label: {
@@ -156,6 +158,7 @@ struct Composer: View {
             .padding(.bottom, 8)
         }
         .background(.bar)
+        .slashSheets(slash)
         .sheet(isPresented: $showLater) {
             SendLaterSheet { date, rep in schedule(at: date, repeat: rep) }
                 .presentationDetents([.medium, .large])
@@ -202,31 +205,6 @@ struct Composer: View {
         draft = ""
         Haptics.success()
         Task { if !(await state.sendLater(text, at: date, repeat: rep)) { draft = kept } }
-    }
-
-    /// Type "/" and the commands offer themselves.
-    private var commandStrip: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(commandHints, id: \.0) { cmd, what in
-                    Button {
-                        draft = ""
-                        Haptics.tap()
-                        _ = onCommand?(cmd)
-                    } label: {
-                        HStack(spacing: 5) {
-                            Text(cmd).font(.caption.monospaced().weight(.semibold))
-                            Text(what).font(.caption).foregroundStyle(.secondary)
-                        }
-                        .padding(.horizontal, 10).padding(.vertical, 6)
-                        .background(.quaternary.opacity(0.5), in: .capsule)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(.horizontal, 12).padding(.top, 8)
-        }
-        .frame(height: 40)
     }
 
     /// What is going up with the next message, and how to change your mind.
