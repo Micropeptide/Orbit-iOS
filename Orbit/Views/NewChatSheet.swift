@@ -21,6 +21,9 @@ struct NewChatSheet: View {
     @State private var madeSid: String?
     // presets (Views/Chat/ChatPresets.swift)
     @State private var presets: [ChatPreset] = []
+    /// Whether `presets` is the Mac's list. The Mac replaces the whole list on a
+    /// save, so a save from a list that never loaded would wipe it.
+    @State private var presetsLoaded = false
     @State private var presetName = ""
 
     private var modelName: String {
@@ -131,7 +134,10 @@ struct NewChatSheet: View {
         async let saved = try? state.server?.chatPresets()
         let defaults = try? await state.server?.chatWork(sid: "")
         await hosts
-        presets = (await saved ?? nil) ?? []
+        if let list = await saved ?? nil {
+            presets = list
+            presetsLoaded = true
+        }
         if let d = defaults {
             mode = d.defaultMode
             if let h = d.defaultHost {
@@ -216,6 +222,11 @@ struct NewChatSheet: View {
                            mode: harness.isAgent ? mode.rawValue : "",
                            host: harness.isAgent ? host : "")
         do {
+            if !presetsLoaded {
+                // not read yet, or the read failed: read them now rather than overwrite them
+                presets = try await server.chatPresets()
+                presetsLoaded = true
+            }
             try await server.savePresets(presets + [p])
             presetName = ""
         } catch {
