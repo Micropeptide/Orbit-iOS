@@ -66,7 +66,8 @@ struct KeyCommands: View {
         let modifiers: EventModifiers
         let enabled: Bool
         let action: () -> Void
-        var id: String { title }
+        /// By key rather than title: two shortcuts may share a title (Esc and ⌃L both clear the box).
+        var id: String { "\(modifiers.rawValue)-\(key.character)" }
 
         init(_ title: String, _ key: KeyEquivalent, _ modifiers: EventModifiers = [],
              enabled: Bool = true, action: @escaping () -> Void) {
