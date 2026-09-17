@@ -88,6 +88,8 @@ final class AppState: ObservableObject {
     @Published var pendingApproval: (name: String, reason: String, id: String)?
     /// Questions, approvals, plan mode, temporary chat, row status (AppState+Chat.swift).
     @Published var chatExtras = ChatExtras()
+    /// The list's paging, /tasks and the first-pairing tips (AppState+Work.swift).
+    @Published var work = WorkExtras()
 
     private(set) var server: OrbitServer?
     private var streamTask: Task<Void, Never>?
@@ -156,6 +158,7 @@ final class AppState: ObservableObject {
         models = []; projects = []; attachments = []
         currentModel = nil; defaultModel = nil; deepLink = nil
         remoteHosts = []; hostProbes = [:]; probeErrors = [:]; harnessMode = .orbit
+        work = WorkExtras()
         localServer = LocalServer()
     }
 
@@ -237,7 +240,9 @@ final class AppState: ObservableObject {
     func loadChats() async {
         guard let server else { return }
         do {
-            let list = try await server.chats()
+            let page = try await server.chatPage(limit: work.chatLimit)
+            let list = keepingExternal(page.items)
+            work.chatTotal = page.total
             chats = list
             Cache.saveChats(list)
             lastError = nil
@@ -271,7 +276,7 @@ final class AppState: ObservableObject {
     /// Reads through `peek`, which does not move what the Mac has open.
     private func prefetch(_ list: [ChatSummary]) async {
         guard let server else { return }
-        for c in list.filter({ $0.archived != true }).prefix(8) {
+        for c in list.filter({ $0.archived != true && $0.external != true }).prefix(8) {
             if let d = Cache.messagesDate(c.id), d.timeIntervalSince1970 >= c.mtime { continue }
             if let detail = try? await server.peek(c.id) {
                 Cache.saveMessages(detail.messages, for: c.id)
