@@ -11,6 +11,7 @@ struct ChatView: View {
     @EnvironmentObject var state: AppState
     @State private var draft = ""
     @State private var showModels = false
+    @State private var showLibrary = false      // Library: agent, instructions, memory for this chat
     @State private var renaming = false
     @State private var newTitle = ""
     @State private var confirmBin = false
@@ -67,6 +68,9 @@ struct ChatView: View {
                         Button { makePDF() } label: {
                             Label("Share as PDF", systemImage: "doc.richtext")
                         }
+                        Button { showLibrary = true } label: {
+                            Label("Agent, instructions, memory", systemImage: "books.vertical")
+                        }
                         Button { finding = true; findFocused = true } label: {
                             Label("Find in chat", systemImage: "magnifyingglass")
                         }
@@ -103,6 +107,7 @@ struct ChatView: View {
                 Text("It stays in the bin on your Mac for the retention period.")
             }
             .sheet(isPresented: $showModels) { ModelPickerView() }
+            .sheet(isPresented: $showLibrary) { ChatLibrarySheet(sid: sid) }
             .sheet(item: $links.presenting) { FilePreviewSheet(target: $0) }
             .sheet(item: $pdfURL) { ActivityView(items: [$0]).ignoresSafeArea() }
             .onChange(of: state.draftPrefill) { _, text in
