@@ -15,6 +15,7 @@ struct ChatView: View {
     /// it off (dragging back up to read); rows changing height never do -- they used to
     /// leave the view parked past the end of a finished answer, which looked blank.
     @State private var following = true
+    @State private var viewportHeight: CGFloat = 800
     /// Bumped by the "Latest" button, which lives in the composer, away from the scroll proxy.
     @State private var scrollDownRequest = 0
     @EnvironmentObject var state: AppState
@@ -163,6 +164,8 @@ struct ChatView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 14)
             }
+            .coordinateSpace(name: "transcript")
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { viewportHeight = $0 }
             .defaultScrollAnchor(.bottom)          // open at the newest message
             .scrollDismissesKeyboard(.interactively)
             .apply { followingNewest($0, proxy: proxy) }
@@ -263,9 +266,15 @@ struct ChatView: View {
                     ChatPromptCards().id("prompts")
                     if let e = state.lastError, !state.streaming { errorNote(e) }
                     // seen = you are at the newest message; new text follows you only then
+                    // where the end of the chat is on screen: within a short reach of the bottom
+                    // edge counts as being at the newest message (appear/disappear can't tell --
+                    // an ordinary stack creates every row up front)
                     Color.clear.frame(height: 8).id("bottom")
-                        .onAppear { atBottom = true; newBelow = false; following = true }
-                        .onDisappear { atBottom = false }
+                        .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named("transcript")).minY } action: { y in
+                            let near = y < viewportHeight + 60
+                            if near != atBottom { atBottom = near }
+                            if near { newBelow = false; following = true }
+                        }
     }
 
     /// Shown in the transcript where the answer would have been, because that
