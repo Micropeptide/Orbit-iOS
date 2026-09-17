@@ -7,6 +7,8 @@ struct RootView: View {
     @State private var showSample = false
     /// The welcome tips are shown once, after this phone first pairs.
     @AppStorage("orbit.tipsShown") private var tipsShown = false
+    /// One object for the life of the app, so code blocks read it without redrawing.
+    @State private var blockActions = BlockActions()
 
     /// Development only: `ORBIT_TAB=scheduled|files|library|settings` opens on that tab so the
     /// simulator can be screenshotted without a finger. Compiled out of release.
@@ -65,7 +67,9 @@ struct RootView: View {
         }
         }
         .preferredColorScheme(Appearance.scheme(theme))
+        .environment(\.blockActions, blockActions)
         .onAppear {
+            blockActions.state = state
             state.tab = Self.initialTab
             #if DEBUG
             showSample = MarkdownSample.wanted

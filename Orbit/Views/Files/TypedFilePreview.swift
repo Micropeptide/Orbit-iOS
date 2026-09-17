@@ -4,11 +4,17 @@ import SwiftUI
 /// CSV as a table you can filter and sort, a notebook as its cells, code and
 /// text in monospace with line numbers, a page rendered or as its source.
 /// Everything else goes to QuickLook from the Files list.
+///
+/// It is handed the server rather than watching the app's state, and parses the
+/// file once when it arrives: a streaming answer publishes many times a second,
+/// and re-reading a CSV or a notebook's images on each of those froze the sheet.
 struct TypedFilePreview: View {
     let file: RemoteFile
-    @EnvironmentObject var state: AppState
+    let server: OrbitServer?
     @Environment(\.dismiss) private var dismiss
     @State private var text: String?
+    /// What `text` becomes on screen, worked out once in `load()`.
+    @State private var parsed: Parsed?
     @State private var failed: String?
     @State private var truncated = false
     @State private var showSource = false
@@ -18,6 +24,15 @@ struct TypedFilePreview: View {
     static let limit = 2_000_000
 
     enum Kind { case markdown, table, notebook, page, text }
+
+    /// The file read into the shape it is drawn in.
+    enum Parsed {
+        case markdown(String)
+        case table([[String]])
+        case notebook(Notebook?)
+        case page(String)
+        case text(String)
+    }
 
     static func kind(_ f: RemoteFile) -> Kind? {
         switch f.ext {
@@ -37,8 +52,8 @@ struct TypedFilePreview: View {
     var body: some View {
         NavigationStack {
             Group {
-                if let text {
-                    content(text)
+                if let parsed {
+                    content(parsed)
                 } else if let failed {
                     ContentUnavailableView("Couldn't open it", systemImage: "doc.questionmark",
                                            description: Text(failed))
@@ -78,33 +93,40 @@ struct TypedFilePreview: View {
     }
 
     @ViewBuilder
-    private func content(_ text: String) -> some View {
-        switch Self.kind(file) ?? .text {
-        case .markdown:
+    private func content(_ parsed: Parsed) -> some View {
+        switch parsed {
+        case .markdown(let text):
             ScrollView { MarkdownText(text).padding() }
-        case .table:
-            ScrollView {
-                TableBlock(rows: CSV.parse(text, separator: file.ext == "tsv" ? "\t" : ","), full: true).padding()
-            }
-        case .notebook:
-            ScrollView { NotebookCells(json: text).padding() }
-        case .page:
+        case .table(let rows):
+            // the table scrolls itself, both ways, and draws only the rows on screen
+            TableBlock(rows: rows, full: true).padding()
+        case .notebook(let nb):
+            ScrollView { NotebookCells(notebook: nb).padding() }
+        case .page(let text):
             if showSource { NumberedText(text: text) } else { SandboxedPage(html: text).ignoresSafeArea(edges: .bottom) }
-        case .text:
-            NumberedText(text: prettyIfJSON(text))
+        case .text(let text):
+            NumberedText(text: text)
         }
     }
 
-    private func prettyIfJSON(_ s: String) -> String {
-        guard file.ext == "json", s.utf8.count < 1_000_000,
-              let obj = try? JSONSerialization.jsonObject(with: Data(s.utf8), options: [.fragmentsAllowed]),
-              let d = try? JSONSerialization.data(withJSONObject: obj, options: [.prettyPrinted, .withoutEscapingSlashes, .fragmentsAllowed])
-        else { return s }
-        return String(decoding: d, as: UTF8.self)
+    /// Off the main thread: a big CSV or a notebook full of plots takes a moment.
+    private static func parse(_ text: String, file: RemoteFile) async -> Parsed {
+        let kind = kind(file) ?? .text
+        let ext = file.ext
+        return await Task.detached(priority: .userInitiated) { () -> Parsed in
+            switch kind {
+            case .markdown: return .markdown(text)
+            case .table: return .table(CSV.parse(text, separator: ext == "tsv" ? "\t" : ","))
+            case .notebook: return .notebook(Notebook(json: text))
+            case .page: return .page(text)
+            case .text: return .text(prettyIfJSON(text, ext: ext))
+            }
+        }.value
     }
 
     private func load() async {
-        guard let server = state.server else { failed = "Not paired with a Mac."; return }
+        guard parsed == nil else { return }
+        guard let server else { failed = "Not paired with a Mac."; return }
         do {
             var data = try await server.workspaceBytes(rel: file.rel)
             // a notebook cut short is not JSON any more: read those whole
@@ -112,17 +134,29 @@ struct TypedFilePreview: View {
                 data = data.prefix(Self.limit)
                 truncated = true
             }
-            text = String(decoding: data, as: UTF8.self)
+            let read = String(decoding: data, as: UTF8.self)
+            parsed = await Self.parse(read, file: file)
+            text = read
         } catch { failed = error.localizedDescription }
     }
 
     private func share() {
-        guard let server = state.server else { return }
+        guard let server else { return }
         Task {
             do { shareURL = try await server.download(rel: file.rel, name: file.name) }
             catch { failed = error.localizedDescription }
         }
     }
+}
+
+/// A JSON file laid out readably; anything else, or anything too big, as it is.
+/// Outside the view so it can run off the main thread.
+private func prettyIfJSON(_ s: String, ext: String) -> String {
+    guard ext == "json", s.utf8.count < 1_000_000,
+          let obj = try? JSONSerialization.jsonObject(with: Data(s.utf8), options: [.fragmentsAllowed]),
+          let d = try? JSONSerialization.data(withJSONObject: obj, options: [.prettyPrinted, .withoutEscapingSlashes, .fragmentsAllowed])
+    else { return s }
+    return String(decoding: d, as: UTF8.self)
 }
 
 /// Monospaced text with line numbers, scrolling both ways.
@@ -148,41 +182,32 @@ struct NumberedText: View {
     }
 }
 
-/// A Jupyter notebook's cells: Markdown rendered, code with what it printed and drew.
-struct NotebookCells: View {
-    private let cells: [Cell]?
-    private let language: String
-
-    /// Read once: a notebook with plots is megabytes of JSON.
-    init(json: String) {
-        language = Self.language(json)
-        cells = Self.cells(json)
-    }
-
-    private struct Cell: Identifiable {
+/// A Jupyter notebook read once into its cells: Markdown, or code with what it
+/// printed and drew. Nil when the file is not a notebook.
+struct Notebook {
+    struct Cell: Identifiable {
         let id: Int
         let kind: String
         let source: String
         let outputs: [Output]
     }
 
-    private enum Output { case text(String), image(UIImage) }
+    enum Output { case text(String), image(UIImage) }
 
-    private static func language(_ json: String) -> String {
-        guard let o = try? JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any],
-              let meta = o["metadata"] as? [String: Any],
-              let info = meta["language_info"] as? [String: Any], let name = info["name"] as? String else { return "python" }
-        return name
-    }
+    let language: String
+    let cells: [Cell]
 
-    private static func cells(_ json: String) -> [Cell]? {
+    init?(json: String) {
         guard let o = try? JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any],
               let raw = o["cells"] as? [[String: Any]] else { return nil }
+        let meta = o["metadata"] as? [String: Any]
+        let info = meta?["language_info"] as? [String: Any]
+        language = (info?["name"] as? String) ?? "python"
         func joined(_ v: Any?) -> String {
             if let s = v as? String { return s }
             return ((v as? [Any]) ?? []).map { "\($0)" }.joined()
         }
-        return raw.enumerated().map { i, c in
+        cells = raw.enumerated().map { i, c in
             var outs: [Output] = []
             for out in (c["outputs"] as? [[String: Any]]) ?? [] {
                 if let t = out["text"] { outs.append(.text(joined(t))) }
@@ -204,16 +229,21 @@ struct NotebookCells: View {
             return Cell(id: i, kind: (c["cell_type"] as? String) ?? "code", source: joined(c["source"]), outputs: outs)
         }
     }
+}
+
+/// A Jupyter notebook's cells: Markdown rendered, code with what it printed and drew.
+struct NotebookCells: View {
+    let notebook: Notebook?
 
     var body: some View {
-        if let cells {
+        if let notebook {
             LazyVStack(alignment: .leading, spacing: 14) {
-                ForEach(cells) { cell in
+                ForEach(notebook.cells) { cell in
                     if cell.kind == "markdown" {
                         MarkdownText(cell.source)
                     } else {
                         VStack(alignment: .leading, spacing: 6) {
-                            CodeBlock(language: cell.kind == "code" ? language : cell.kind, code: cell.source)
+                            CodeBlock(language: cell.kind == "code" ? notebook.language : cell.kind, code: cell.source)
                             ForEach(Array(cell.outputs.enumerated()), id: \.offset) { _, out in
                                 switch out {
                                 case .text(let t):
