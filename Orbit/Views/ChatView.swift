@@ -148,7 +148,60 @@ struct ChatView: View {
     private var transcript: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 18) {
+                // A plain stack for ordinary chats: the lazy one mis-measured tall answers (a long
+                // list, a big table) and parked the view past the end, so the chat looked blank.
+                // Only very long chats, where drawing every row costs too much, stay lazy.
+                Group {
+                    if state.messages.count + state.liveSteps.count <= 80 {
+                        VStack(alignment: .leading, spacing: 18) { transcriptContent }
+                    } else {
+                        LazyVStack(alignment: .leading, spacing: 18) { transcriptContent }
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 14)
+            }
+            .defaultScrollAnchor(.bottom)          // open at the newest message
+            .scrollDismissesKeyboard(.interactively)
+            .apply { followingNewest($0, proxy: proxy) }
+            .onChange(of: actionsModel.jumpRequest) { _, i in
+                guard let i else { return }
+                jumpTo = i
+                actionsModel.jumpRequest = nil
+            }
+            .onChange(of: jumpTo) { _, i in
+                guard let i else { return }
+                withAnimation(reduceMotion ? nil : .default) {
+                    proxy.scrollTo("row-\(i)", anchor: .center)
+                    flashed = i
+                }
+                jumpTo = nil
+            }
+            .onAppear { scroll(proxy, animated: false) }
+            .onDisappear { SeenChats.mark(sid, mtime: state.chats.first { $0.id == sid }?.mtime ?? 0) }
+            .modifier(AnswerTextSize())
+            // file names in answers are looked up in this chat
+            .environment(\.fileLinkSid, sid)
+            .task(id: sid) {
+                // what you were typing here last time, unless something is being handed in
+                draft = Drafts.load(sid)
+                await state.open(sid)
+                SeenChats.mark(sid, mtime: state.chats.first { $0.id == sid }?.mtime ?? 0)
+                if let text = state.draftPrefill { draft = text; typing = true; state.draftPrefill = nil }
+                // a search hit: land on that message and flash it once the rows exist
+                guard let h = highlight, h < state.messages.count, flashed == nil else { return }
+                try? await Task.sleep(nanoseconds: 250_000_000)
+                withAnimation { proxy.scrollTo("row-\(h)", anchor: .center) }
+                withAnimation { flashed = h }
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                withAnimation { flashed = nil }
+            }
+        }
+    }
+
+    /// Every row of the transcript: your messages and answers, the answer being written,
+    /// prompts, errors, and the marker that says you are at the newest message.
+    @ViewBuilder private var transcriptContent: some View {
                     if state.messages.isEmpty && !state.streaming {
                         VStack(spacing: 10) {
                             Image("OrbitMark").resizable().scaledToFit()
@@ -211,46 +264,6 @@ struct ChatView: View {
                     Color.clear.frame(height: 8).id("bottom")
                         .onAppear { atBottom = true; newBelow = false; following = true }
                         .onDisappear { atBottom = false }
-                }
-                .padding(.horizontal, 16)
-                .padding(.top, 14)
-            }
-            .defaultScrollAnchor(.bottom)          // open at the newest message
-            .scrollDismissesKeyboard(.interactively)
-            .apply { followingNewest($0, proxy: proxy) }
-            .onChange(of: actionsModel.jumpRequest) { _, i in
-                guard let i else { return }
-                jumpTo = i
-                actionsModel.jumpRequest = nil
-            }
-            .onChange(of: jumpTo) { _, i in
-                guard let i else { return }
-                withAnimation(reduceMotion ? nil : .default) {
-                    proxy.scrollTo("row-\(i)", anchor: .center)
-                    flashed = i
-                }
-                jumpTo = nil
-            }
-            .onAppear { scroll(proxy, animated: false) }
-            .onDisappear { SeenChats.mark(sid, mtime: state.chats.first { $0.id == sid }?.mtime ?? 0) }
-            .modifier(AnswerTextSize())
-            // file names in answers are looked up in this chat
-            .environment(\.fileLinkSid, sid)
-            .task(id: sid) {
-                // what you were typing here last time, unless something is being handed in
-                draft = Drafts.load(sid)
-                await state.open(sid)
-                SeenChats.mark(sid, mtime: state.chats.first { $0.id == sid }?.mtime ?? 0)
-                if let text = state.draftPrefill { draft = text; typing = true; state.draftPrefill = nil }
-                // a search hit: land on that message and flash it once the rows exist
-                guard let h = highlight, h < state.messages.count, flashed == nil else { return }
-                try? await Task.sleep(nanoseconds: 250_000_000)
-                withAnimation { proxy.scrollTo("row-\(h)", anchor: .center) }
-                withAnimation { flashed = h }
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
-                withAnimation { flashed = nil }
-            }
-        }
     }
 
     /// Shown in the transcript where the answer would have been, because that
