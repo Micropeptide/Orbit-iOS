@@ -33,6 +33,7 @@ struct OrbitApp: App {
                     state.backgrounded = (new != .active)
                     switch new {
                     case .active:
+                        state.markOpenChatSeen()
                         // coming back from the lock screen should show the truth,
                         // not whatever was on screen twenty minutes ago
                         state.endBackgroundGrace()
