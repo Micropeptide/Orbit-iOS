@@ -37,6 +37,7 @@ struct SettingsView: View {
                 HarnessSection()
                 AutonomySection()
                 BackupSection()
+                MacSettingsSection()
 
                 Section {
                     Picker("New chats use", selection: Binding(
