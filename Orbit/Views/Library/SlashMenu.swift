@@ -47,10 +47,22 @@ struct SlashItem: Identifiable, Hashable {
 enum SlashSheet: Identifiable {
     case section(LibrarySection, sid: String?)
     case chat(String)
+    /// `/export`: the chat as Markdown, for the share sheet.
+    case share(URL)
+    /// `/tools` and other answers too long for a line.
+    case info(title: String, text: String)
+    case doctor
+    case shortcuts
+    case history
     var id: String {
         switch self {
         case .section(let s, _): return "section." + s.rawValue
         case .chat(let sid):  return "chat." + sid
+        case .share(let url): return "share." + url.absoluteString
+        case .info(let t, _): return "info." + t
+        case .doctor: return "doctor"
+        case .shortcuts: return "shortcuts"
+        case .history: return "history"
         }
     }
 }
@@ -70,7 +82,24 @@ final class SlashController: ObservableObject {
         ("/agent", "choose this chat's agent"), ("/instructions", "this chat's own instructions"),
         ("/remember", "save a note to memory: /remember <text>"),
         ("/scheduled", "messages and tasks for later"), ("/files", "files Orbit made or you gave it"),
+        ("/rename", "rename this chat: /rename <title>"),
+        ("/later", "send later: /later 21:30 <message>, /later tomorrow 9am …, /later daily 8:00 …"),
+        ("/tasks", "everything scheduled or waiting — messages and tasks"),
+        ("/plan", "plan mode: it may read and think but change nothing"),
+        ("/build", "leave plan mode: it may make changes again"),
+        ("/export", "download this chat as markdown"),
+        ("/tools", "list active tools"), ("/status", "server, memory, context"),
+        ("/doctor", "check deps, disk, server, config for problems"),
+        ("/settings", "open settings"),
+        ("/start", "start the model server"), ("/restart", "restart the server (applies settings)"),
+        ("/stop", "stop the model server (frees ~15 GB)"),
+        ("/sound", "a sound with the notification when an answer finishes while you are away"),
+        ("/history", "earlier messages you sent — pick one to send again"),
+        ("/shortcuts", "every keyboard shortcut"),
     ]
+
+    /// Commands that wait for words after them rather than running when picked.
+    static let takesWords: Set<String> = ["/remember", "/rename", "/later"]
 
     func items(for draft: String, builtins: [(String, String)], catalog: SlashCatalog,
                claude: Bool) -> [SlashItem] {
@@ -146,9 +175,78 @@ final class SlashController: ObservableObject {
         case "/remember":
             guard !rest.isEmpty else { return "/remember " }
             Task { await remember(rest, state: state) }
+        case "/rename":
+            guard let sid else { note = "Open a chat first"; return "" }
+            guard !rest.isEmpty else { note = "Type the new title after /rename"; return "/rename " }
+            Task {
+                await state.rename(sid, to: rest)
+                note = "Renamed to “\(rest)”"
+            }
+        case "/later":
+            guard LaterParser.parse(rest).map({ !$0.text.isEmpty }) == true else {
+                note = "Usage: " + LaterParser.usage
+                return "/later " + rest
+            }
+            Task { _ = await state.sendLaterParsed(rest) }
+        case "/tasks":     state.tab = "scheduled"
+        case "/plan", "/build":
+            let on = head.lowercased() == "/plan"
+            Task { if state.chatExtras.planMode != on { await state.setPlanMode(on) } }
+        case "/export":
+            guard let sid, let server = state.server else { note = "Open a chat first"; return "" }
+            Task {
+                do {
+                    sheet = .share(try await server.exportMarkdown(sid, title: state.openChat?.title ?? "Chat"))
+                } catch { note = error.localizedDescription }
+            }
+        case "/tools":
+            Task {
+                do {
+                    let tools = try await state.server?.activeTools() ?? []
+                    sheet = .info(title: "Active tools",
+                                  text: tools.isEmpty ? "No tools are active." : tools.joined(separator: "\n"))
+                } catch { note = error.localizedDescription }
+            }
+        case "/status":
+            Task {
+                do {
+                    guard let s = try await state.server?.chatStatus(sid: sid) else { return }
+                    var bits = [s.running ? "running" : "stopped"]
+                    if let m = s.model, !m.isEmpty { bits.append(m) }
+                    if let g = s.memoryGB { bits.append("\(g.formatted()) GB") }
+                    if let c = s.context { bits.append("ctx \(c.used.formatted())/\(c.max.formatted())") }
+                    note = bits.joined(separator: " · ")
+                } catch { note = error.localizedDescription }
+            }
+        case "/doctor":    sheet = .doctor
+        case "/settings":  state.tab = "settings"
+        case "/start", "/stop", "/restart":
+            let action: OrbitServer.ServerAction = head.lowercased() == "/stop" ? .stop
+                : head.lowercased() == "/start" ? .start : .restart
+            note = "\(action.rawValue == "stop" ? "stopping" : action.rawValue + "ing") the server…"
+            Task {
+                await state.serverAction(action)
+                note = state.localServer.note ?? "done"
+            }
+        case "/sound":
+            let on = !(UserDefaults.standard.object(forKey: "orbit.sound") as? Bool ?? true)
+            UserDefaults.standard.set(on, forKey: "orbit.sound")
+            note = on ? "Sound on — when an answer finishes while you are away" : "Sound off"
+        case "/history":   sheet = .history
+        case "/shortcuts": sheet = .shortcuts
         default: return nil
         }
         return ""
+    }
+
+    /// An `/unknown` command in one of Orbit's own chats: what it might have been.
+    func unknownCommand(_ text: String, builtins: [(String, String)]) -> String {
+        let head = (text.split(whereSeparator: { $0 == " " || $0 == "\n" }).first.map(String.init) ?? text).lowercased()
+        let names = builtins.map(\.0) + Self.libraryCommands.map(\.0)
+            + SlashCatalog.shared.prompts.map { "/" + $0.name }
+        let near = names.filter { $0.lowercased().hasPrefix(head) }.prefix(4)
+        return near.isEmpty ? "Unknown command \(head) — type / to see the list"
+                            : "Unknown command — did you mean \(near.joined(separator: ", "))?"
     }
 
     /// Tapping a line in the menu.
@@ -159,7 +257,7 @@ final class SlashController: ObservableObject {
             draft = ""
             _ = onCommand?(item.command)
         case .library:
-            if item.command == "/remember" { draft = "/remember "; return }
+            if Self.takesWords.contains(item.command) { draft = item.command + " "; return }
             draft = intercept(item.command, state: state) ?? ""
         case .prompt:
             let p = SlashCatalog.shared.prompts.first { "/" + $0.name == item.command }
@@ -264,7 +362,48 @@ extension View {
             switch target {
             case .section(let s, let sid): LibrarySheet(section: s, sid: sid)
             case .chat(let sid):  ChatLibrarySheet(sid: sid)
+            case .share(let url): ActivityView(items: [url]).ignoresSafeArea()
+            case .info(let title, let text): SlashInfoSheet(title: title, text: text)
+            case .doctor:
+                NavigationStack {
+                    StatusHealthView()
+                        .toolbar { ToolbarItem(placement: .confirmationAction) { DismissButton() } }
+                }
+            case .shortcuts: ShortcutsSheet()
+            case .history: SlashHistorySheet()
             }
         }
     }
+}
+
+/// A command's answer too long for the line under the box.
+private struct SlashInfoSheet: View {
+    let title: String
+    let text: String
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                Text(text).font(.callout.monospaced()).textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading).padding()
+            }
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+        }
+        .presentationDetents([.medium, .large])
+    }
+}
+
+/// "Done" for a screen borrowed from Settings.
+private struct DismissButton: View {
+    @Environment(\.dismiss) private var dismiss
+    var body: some View { Button("Done") { dismiss() } }
+}
+
+/// `/history`: the message picked goes back in the box.
+private struct SlashHistorySheet: View {
+    @EnvironmentObject var state: AppState
+    var body: some View { PromptHistorySheet { state.draftPrefill = $0 } }
 }

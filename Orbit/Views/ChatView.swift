@@ -33,6 +33,7 @@ struct ChatView: View {
     @AppStorage("orbit.verboseTools") private var verboseTools = false
     @AppStorage("orbit.todosHidden") private var todosHidden = false
     @AppStorage("theme") private var theme = "system"
+    @AppStorage("orbit.hideTools") private var hideTools = false
 
     var body: some View {
         // The banner and composer are safe-area insets rather than VStack rows:
@@ -58,9 +59,11 @@ struct ChatView: View {
                             Label("Change model", systemImage: "cpu")
                         }
                         .keyboardShortcut("k", modifiers: .command)
+                        .disabled(state.streaming)
                         Button { renaming = true; newTitle = state.openChat?.title ?? "" } label: {
                             Label("Rename", systemImage: "pencil")
                         }
+                        .disabled(state.streaming)
                         ShareLink(item: state.markdown(for: sid),
                                   preview: SharePreview(state.openChat?.title ?? "Chat")) {
                             Label("Share as Markdown", systemImage: "square.and.arrow.up")
@@ -86,16 +89,18 @@ struct ChatView: View {
                         } label: {
                             Label("Compact history", systemImage: "arrow.down.right.and.arrow.up.left")
                         }
+                        .disabled(state.streaming)
                         ChatMenuItems(sid: sid, model: actionsModel)
                         Divider()
                         Button(role: .destructive) { confirmBin = true } label: {
                             Label("Move to bin", systemImage: "trash")
                         }
+                        .disabled(state.streaming)
                     } label: {
                         Image(systemName: "ellipsis.circle")
                     }
+                    // what only reads (find, share, jump, context) stays open while it answers
                     .accessibilityLabel("Chat options")
-                    .disabled(state.streaming)
                 }
             }
             .alert("Rename chat", isPresented: $renaming) {
@@ -151,21 +156,28 @@ struct ChatView: View {
                                 .multilineTextAlignment(.center)
                             Text("Answering with \(currentModelName)")
                                 .font(.caption2).foregroundStyle(.tertiary)
+                            EmptyChatHero(sid: sid)
                         }
                         .frame(maxWidth: .infinity)
-                        .padding(.top, 80).padding(.horizontal, 24)
+                        .padding(.top, 48).padding(.horizontal, 24)
                     }
                     let rows = transcriptRows
+                    let stamped = TranscriptRow.stamped(hideTools ? rows.filter { !$0.message.onlyToolCalls } : rows)
                     ForEach(rows) { row in
                         let i = row.index
                         let m = row.message
-                        MessageBubble(message: m,
+                        // /hidetools: a step that is only finished tool calls is left out
+                        if !(hideTools && m.onlyToolCalls) {
+                        VStack(alignment: .leading, spacing: 3) {
+                        MessageBubble(message: hideTools ? m.hidingTools : m,
                                       isLast: row.id == rows.last?.id,
                                       onEdit: { msg in Task { await state.editAndResend(msg) } },
                                       onRegenerate: { actionsModel.confirmRegenerate = false },
                                       onQuote: { msg in quote(msg) },
                                       actions: actionsModel.actions(state),
                                       showByline: row.showByline)
+                        if stamped.contains(m.id), let t = m.t { MessageTime(t: t, trailing: m.isUser) }
+                        }
                             .id(m.id)
                             .padding(.top, row.joinsPrevious ? -12 : 0)
                             .padding(.horizontal, flashed == i ? 8 : 0)
@@ -173,6 +185,7 @@ struct ChatView: View {
                             .background(flashed == i ? Color.yellow.opacity(0.18) : .clear,
                                         in: .rect(cornerRadius: 10))
                             .id("row-\(i)")
+                        }
                     }
                     if state.streaming {
                         // each finished step of the running answer is its own row: packed into one
@@ -371,6 +384,12 @@ struct ChatView: View {
                 state.toast("Nothing to fork yet"); return true
             }
             Task { await state.fork(from: last) }
+        case "/jump":        actionsModel.showJump = true
+        case "/stats":       actionsModel.showStats = true
+        case "/hidetools":
+            hideTools.toggle()
+            state.toast(hideTools ? "Finished tool rows hidden" : "Tool rows shown")
+        case "/clear":       state.messages = []     // the screen only; the chat is untouched
         case "/help":        actionsModel.showHelp = true
         default: return false
         }

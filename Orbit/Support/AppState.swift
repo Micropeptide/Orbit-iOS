@@ -303,6 +303,7 @@ final class AppState: ObservableObject {
             detachLive()
         }
         if openChat?.sid != id { queue = .empty }
+        markSeen(id)
         // show the cached copy immediately; the network fills it in
         if let cached = Cache.loadMessages(id), !cached.isEmpty {
             messages = cached
@@ -480,6 +481,7 @@ final class AppState: ObservableObject {
 
     private func apply(_ ev: StreamEvent) {
         lastLiveEvent = Date()
+        alert(for: ev)          // questions, approvals, errors: tell you if you are elsewhere
         switch ev {
         case .content(let t):
             nextStep()
@@ -558,7 +560,7 @@ final class AppState: ObservableObject {
         guard !Self.askedForNotifications else { return }
         Self.askedForNotifications = true
         UNUserNotificationCenter.current()
-            .requestAuthorization(options: [.alert, .sound]) { _, _ in }
+            .requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
     }
 
     // ------------------------------------------------------------ steps and the status line
@@ -620,7 +622,8 @@ final class AppState: ObservableObject {
         if !answered.isEmpty {
             notifyIfBackgrounded(title: openChat?.title ?? "Orbit", body: answered, sid: sid)
         }
-        Task { await loadChats(); await loadQueue(); await reloadSaved(sid) }
+        // the Mac may have started the next queued message: draw it and follow its answer
+        Task { await loadChats(); await reloadSaved(sid); await followQueue(after: sid) }
     }
 
     /// Reconnect to an answer already running on the Mac.
@@ -721,7 +724,8 @@ final class AppState: ObservableObject {
 
     func newChat() async -> String? {
         guard let server else { return nil }
-        guard let sid = try? await server.newChat() else { return nil }
+        // in the project the chat list shows (none from "All"), as the web starts one
+        guard let sid = try? await server.newChat(project: composerExtras.projectFilter) else { return nil }
         openChat = ChatDetail(sid: sid, title: nil, messages: [])
         messages = []
         await loadChats()
@@ -782,6 +786,8 @@ final class AppState: ObservableObject {
     /// The open chat's waiting messages: queued behind a running answer, or
     /// scheduled for later.
     @Published var queue: QueueState = .empty
+    /// The context gauge, unseen news per chat, the chat list's project (AppState+Queue).
+    @Published var composerExtras = ComposerExtras()
 
     func loadQueue() async {
         guard let server, let sid = openChat?.sid else { queue = .empty; return }
