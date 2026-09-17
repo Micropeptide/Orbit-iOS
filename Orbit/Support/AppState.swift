@@ -760,7 +760,6 @@ extension AppState {
     /// Compiled out of release builds.
     func runDebugScript() async {
         let env = ProcessInfo.processInfo.environment
-        await runChatSelfTest()          // ORBIT_CHAT_SELFTEST (ChatSelfTest.swift)
         guard let want = env["ORBIT_OPEN_CHAT"] else { return }
         let sid = want == "first" ? chats.first?.id : want
         guard let sid, !sid.isEmpty else { return }

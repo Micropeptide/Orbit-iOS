@@ -31,10 +31,6 @@ extension OrbitServer {
         return v
     }
 
-    private static func escaped(_ s: String) -> String {
-        s.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? s
-    }
-
     // ------------------------------------------------------------ providers, accounts, keys
 
     /// `fresh` asks the Mac to re-check the Claude sign-in instead of its cached answer.

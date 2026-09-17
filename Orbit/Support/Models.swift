@@ -136,6 +136,8 @@ struct ModelInfo: Identifiable, Codable, Hashable {
     var ready: Bool?
     var context: Int?
     var note: String?
+    /// Cheaper hours for this model where it is used (the Mac's offpeak policies), if any.
+    var offpeak: OffPeak?
 
     var display: String { label ?? model }
     var isReady: Bool { ready ?? true }
@@ -148,7 +150,7 @@ struct ModelInfo: Identifiable, Codable, Hashable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, label, model, provider, provider_label, ready, context, note
+        case id, label, model, provider, provider_label, ready, context, note, offpeak
     }
 
     init(from d: Decoder) throws {
@@ -162,6 +164,38 @@ struct ModelInfo: Identifiable, Codable, Hashable {
         ready = try? c.decode(Bool.self, forKey: .ready)
         context = try? c.decode(Int.self, forKey: .context)
         note = try? c.decode(String.self, forKey: .note)
+        offpeak = try? c.decode(OffPeak.self, forKey: .offpeak)
+    }
+}
+
+/// A provider's cheaper hours, as the Mac reports them for one model.
+struct OffPeak: Codable, Hashable {
+    var active: Bool?
+    var what: String?          // "50% off", "half usage"
+    var label: String?         // "full rate now · half usage from 03:00"
+    var ends_at: Double?
+    var starts_at: Double?
+    var quota: Bool?
+    var windows_local: [String]?
+    var peak: String?
+
+    /// Now, by the window's own times (the list may be minutes old).
+    var isActive: Bool {
+        let now = Date().timeIntervalSince1970
+        if active == true, let e = ends_at, now >= e { return false }
+        if active != true, let s = starts_at, now >= s { return true }
+        return active == true
+    }
+    var shortText: String {
+        let fmt = { (t: Double) -> String in
+            let d = Date(timeIntervalSince1970: t)
+            let f = DateFormatter()
+            f.dateFormat = Calendar.current.isDateInToday(d) ? "HH:mm" : "EEE HH:mm"
+            return f.string(from: d)
+        }
+        let w = what ?? "cheaper"
+        if isActive { return "\(w) now" + (ends_at.map { " · until \(fmt($0))" } ?? "") }
+        return (quota == true ? "full rate" : "peak price") + (starts_at.map { " · \(w) from \(fmt($0))" } ?? "")
     }
 }
 

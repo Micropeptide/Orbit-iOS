@@ -85,16 +85,6 @@ extension AppState {
         } catch { lastError = error.localizedDescription }
     }
 
-    /// `/api/regenerate` and `/api/retry_harder` work on the chat the Mac has
-    /// open. Open this one there first, and refuse if it is not the one.
-    private func makeOpenOnMac(_ sid: String) async throws {
-        guard let server else { throw OrbitServer.Failure.notPaired }
-        _ = try await server.chat(sid)
-        guard try await server.openChatOnMac() == sid else {
-            throw OrbitServer.Failure.server(409, "the Mac switched to another chat — try again")
-        }
-    }
-
     /// Ask the last question again; `deeper` asks with maximum reasoning effort.
     func regenerateLast(deeper: Bool = false) async {
         guard let server, let sid = openChat?.sid, !streaming else { return }
@@ -102,8 +92,7 @@ extension AppState {
             if (try? await server.stamp(sid).running) == true {
                 throw OrbitServer.Failure.server(409, "that chat is still answering")
             }
-            try await makeOpenOnMac(sid)
-            let text = try await server.regenerateOnMac(deeper: deeper)
+            let text = try await server.regenerateOnMac(sid: sid, deeper: deeper)
             if let i = messages.lastIndex(where: \.isUser) {
                 messages.removeSubrange(i...)
             }
@@ -137,8 +126,7 @@ extension AppState {
         guard let server, let sid = openChat?.sid else { return }
         toast("Capturing the procedure…")
         do {
-            try await makeOpenOnMac(sid)
-            let saved = try await server.captureSkill(name: name)
+            let saved = try await server.captureSkill(name: name, sid: sid)
             toast("Saved skill: \(saved)")
         } catch { lastError = "Couldn't save the skill. \(error.localizedDescription)" }
     }

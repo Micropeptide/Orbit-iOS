@@ -91,18 +91,10 @@ extension OrbitServer {
         return new
     }
 
-    /// Which chat the Mac has open. `/api/regenerate`, `/api/retry_harder` and
-    /// `/api/skill/capture` act on that one, so they are only called after
-    /// checking it is the chat on this screen.
-    func openChatOnMac() async throws -> String? {
-        let obj = try await getJSON("/api/state") as? [String: Any]
-        return obj?["sid"] as? String
-    }
-
     /// Remove the last answer and the question before it on the Mac; returns
     /// that question's text to be sent again.
-    func regenerateOnMac(deeper: Bool) async throws -> String {
-        let r = try await postJSON(deeper ? "/api/retry_harder" : "/api/regenerate", [:])
+    func regenerateOnMac(sid: String, deeper: Bool) async throws -> String {
+        let r = try await postJSON(deeper ? "/api/retry_harder" : "/api/regenerate", ["sid": sid])
         if let s = r["content"] as? String { return s }
         if let parts = r["content"] as? [[String: Any]] {
             return parts.compactMap { $0["type"] as? String == "text" ? $0["text"] as? String : nil }
@@ -144,9 +136,9 @@ extension OrbitServer {
         return (try? JSONDecoder().decode(R.self, from: data))?.rows ?? []
     }
 
-    /// The Mac's open chat, written up as a reusable skill. Runs the model, so slow.
-    func captureSkill(name: String) async throws -> String {
-        let r = try await postJSON("/api/skill/capture", ["name": name], timeout: 600)
+    /// A chat, written up as a reusable skill. Runs the model, so slow.
+    func captureSkill(name: String, sid: String) async throws -> String {
+        let r = try await postJSON("/api/skill/capture", ["name": name, "sid": sid], timeout: 600)
         return (r["name"] as? String) ?? name
     }
 

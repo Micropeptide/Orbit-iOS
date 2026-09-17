@@ -205,7 +205,7 @@ actor OrbitServer {
 
     /// Search inside every conversation, not just their titles.
     func search(_ q: String) async throws -> [SearchHit] {
-        let escaped = q.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? q
+        let escaped = OrbitServer.escaped(q)
         return try await get("/api/searchchats?q=\(escaped)", as: [SearchHit].self)
     }
 
@@ -643,7 +643,7 @@ actor OrbitServer {
 
     /// Bookmarked and recently used folders on a machine ("" = this Mac).
     func folderPlaces(host: String) async throws -> FolderPlaces {
-        let h = host.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? host
+        let h = OrbitServer.escaped(host)
         return try await get("/api/claude/folders?host=\(h)", as: FolderPlaces.self)
     }
 
@@ -658,7 +658,7 @@ actor OrbitServer {
 
     /// Where a Claude Code or Codex chat works, and how much it may do unasked.
     func chatWork(sid: String) async throws -> ChatWork {
-        let s = sid.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? sid
+        let s = OrbitServer.escaped(sid)
         let data = try await run(try request("/api/claude/info?sid=\(s)"))
         guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { throw Failure.decoding("claude/info") }

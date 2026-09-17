@@ -137,12 +137,9 @@ extension OrbitServer {
         return (i.all_tools ?? i.tools ?? []).sorted()
     }
 
-    /// What the Mac has for a chat — its agent and its own instructions. The
-    /// Mac answers for the chat it has open, so this opens `sid` first and
-    /// refuses if something else took over in between.
+    /// What the Mac has for a chat — its agent and its own instructions.
     func chatLibraryState(sid: String) async throws -> ChatLibraryState {
-        _ = try await libGet("/api/session/\(Self.pathSegment(sid))")
-        let st = try decode(ChatLibraryState.self, try await libGet("/api/state"))
+        let st = try decode(ChatLibraryState.self, try await libGet("/api/state?sid=\(OrbitServer.escaped(sid))"))
         guard st.sid == sid else { throw Failure.server(409, "the Mac switched to another chat — try again") }
         return st
     }
@@ -150,16 +147,14 @@ extension OrbitServer {
     /// Give a chat an agent (nil clears it). Returns the tools now active.
     @discardableResult
     func selectAgent(_ name: String?, sid: String) async throws -> [String] {
-        _ = try await chatLibraryState(sid: sid)
         struct R: Codable { var active: String?; var tools: [String]? }
-        let data = try await libPost("/api/agent/select", ["name": name ?? ""])
+        let data = try await libPost("/api/agent/select", ["name": name ?? "", "sid": sid])
         return (try? JSONDecoder().decode(R.self, from: data))?.tools ?? []
     }
 
     /// This chat's own extra system prompt (blank clears it).
     func setChatInstructions(_ text: String, sid: String) async throws {
-        _ = try await chatLibraryState(sid: sid)
-        try await libPost("/api/sysprompt", ["text": text])
+        try await libPost("/api/sysprompt", ["text": text, "sid": sid])
     }
 
     // ------------------------------------------------------------ skills
@@ -209,9 +204,8 @@ extension OrbitServer {
 
     /// Durable facts worth keeping from a chat — the model reads it, so it takes a moment.
     func suggestMemories(sid: String) async throws -> [SuggestedMemory] {
-        _ = try await chatLibraryState(sid: sid)
         struct R: Codable { var items: [SuggestedMemory]?; var error: String? }
-        var req = try authorisedRequest("/api/memory/suggest", method: "POST", body: [:])
+        var req = try authorisedRequest("/api/memory/suggest", method: "POST", body: ["sid": sid])
         req.timeoutInterval = 300
         let r = try decode(R.self, try await perform(req))
         if let e = r.error, !e.isEmpty, (r.items ?? []).isEmpty { throw Failure.server(400, e) }
