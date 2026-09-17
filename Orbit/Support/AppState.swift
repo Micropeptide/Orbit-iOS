@@ -43,6 +43,17 @@ final class AppState: ObservableObject {
     // how much it can do without asking first
     @Published var autonomy: OrbitServer.AutonomySettings?
     @Published var autonomyBusy = false
+    // Claude Code and Codex: which harness new chats use, and the SSH hosts
+    @Published var harnessMode: HarnessKind = .orbit
+    @Published var harnessBusy = false
+    @Published var harnessRecent: [RecentModel] = []
+    @Published var codexRecent: [RecentModel] = []
+    @Published var remoteHosts: [RemoteHost] = []
+    /// The last check of each host. Connecting is slow and a cluster may block
+    /// an address that does it often, so a result is reused rather than redone.
+    @Published var hostProbes: [String: HostProbe] = [:]
+    @Published var probeErrors: [String: String] = [:]
+    @Published var probing: Set<String> = []
     /// Whether the app is in the background, so a finished answer can announce itself.
     var backgrounded = false
     var graceTask: UIBackgroundTaskIdentifier = .invalid
@@ -122,6 +133,7 @@ final class AppState: ObservableObject {
         chats = []; messages = []; openChat = nil; reachable = nil; queue = .empty
         models = []; projects = []; attachments = []
         currentModel = nil; defaultModel = nil; deepLink = nil
+        remoteHosts = []; hostProbes = [:]; probeErrors = [:]; harnessMode = .orbit
         localServer = LocalServer()
     }
 
@@ -224,6 +236,12 @@ final class AppState: ObservableObject {
             // than showing a chip that reads "model"
             let chosen = [m.current, m.default].compactMap { $0 }.first { !$0.isEmpty }
             currentModel = chosen ?? m.models.first { $0.provider == "local" && $0.isReady }?.id
+            harnessRecent = m.harness_recent ?? []
+            codexRecent = m.codex_recent ?? []
+            if m.harness_mode == true { harnessMode = .claude }
+            else if m.codex_mode == true { harnessMode = .codex }
+            else if m.harness_mode == false || m.codex_mode == false { harnessMode = .orbit }
+            else { harnessMode = HarnessKind(modelID: m.default) }     // a Mac that predates the flags
         }
     }
 

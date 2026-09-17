@@ -33,6 +33,7 @@ struct ChatView: View {
             .safeAreaInset(edge: .top, spacing: 0) {
                 VStack(spacing: 0) {
                     ConnectionBanner()
+                    WorkBar(sid: sid)
                     if finding { findBar }
                 }
             }

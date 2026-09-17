@@ -63,6 +63,11 @@ actor OrbitServer {
             let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
             if code == 401 { throw Failure.unauthorised }
             guard (200..<300).contains(code) else {
+                // the Mac explains a refusal as {"error": "..."}; show just that
+                if let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let e = obj["error"] as? String, !e.isEmpty {
+                    throw Failure.server(code, String(e.prefix(200)))
+                }
                 let msg = String(data: data, encoding: .utf8)?
                     .prefix(200).trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
                 throw Failure.server(code, msg)
@@ -455,6 +460,12 @@ actor OrbitServer {
             return .approval(name: str("name"), reason: str("reason"),
                              id: (p as? [String: Any])?["id"] as? String)
         case "approval":       return nil
+        // Claude Code and Codex say what they are doing before the first token —
+        // "starting Codex on <host>" can take a while over SSH
+        case "status":         return .status(p as? String ?? str("msg"))
+        case "notice":
+            let msg = p as? String ?? str("msg")
+            return msg.isEmpty ? nil : .notice(msg)
         case "interjection":   return .status("reading your note")
         case "queued":         return .status("waiting for another chat to finish")
         case "dequeued":       return .status("its turn — starting")
@@ -579,6 +590,85 @@ actor OrbitServer {
 
     func deleteTask(_ id: String) async throws {
         try await post("/api/schedule/delete", ["id": id])
+    }
+
+    // ------------------------------------------------------------ harness and hosts
+
+    /// Which harness new chats use: Orbit's own agent, Claude Code or Codex.
+    func setHarnessMode(_ kind: HarnessKind) async throws -> String? {
+        struct R: Codable { var ok: Bool?; var `default`: String?; var error: String? }
+        let r = try? JSONDecoder().decode(R.self, from: try await post("/api/harness/mode", ["engine": kind.rawValue]))
+        if let e = r?.error { throw Failure.server(400, e) }
+        return r?.default
+    }
+
+    /// The SSH hosts in the Mac's ssh config, with the last check of each if
+    /// the Mac has one. Reading this does not connect to any of them.
+    func remoteHosts() async throws -> [RemoteHost] {
+        struct R: Codable { var hosts: [RemoteHost] }
+        return try await get("/api/remote/hosts", as: R.self).hosts
+    }
+
+    /// Connect to a host and see what it offers. Slow (up to a minute), and a
+    /// cluster may block an address that connects too often — call it only when
+    /// someone asks.
+    func probe(host: String, refresh: Bool = false) async throws -> HostProbe {
+        var body: [String: Any] = ["host": host]
+        if refresh { body["refresh"] = true }
+        var req = try request("/api/remote/probe", method: "POST", body: body)
+        req.timeoutInterval = 120
+        let data = try await run(req)
+        do { return try JSONDecoder().decode(HostProbe.self, from: data) }
+        catch { throw Failure.decoding("\(error)") }
+    }
+
+    /// Folders inside one folder on a host.
+    func listRemote(host: String, path: String) async throws -> RemoteListing {
+        var req = try request("/api/remote/ls", method: "POST", body: ["host": host, "path": path])
+        req.timeoutInterval = 90
+        let r = try JSONDecoder().decode(RemoteListing.self, from: try await run(req))
+        if let e = r.error { throw Failure.server(400, e) }
+        return r
+    }
+
+    /// Bookmarked and recently used folders on a machine ("" = this Mac).
+    func folderPlaces(host: String) async throws -> FolderPlaces {
+        let h = host.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? host
+        return try await get("/api/claude/folders?host=\(h)", as: FolderPlaces.self)
+    }
+
+    /// Star or unstar a folder. Answers with the machine's bookmarks as they now are.
+    func bookmark(host: String, path: String, on: Bool) async throws -> [String] {
+        struct R: Codable { var bookmarks: [String]?; var error: String? }
+        let r = try JSONDecoder().decode(R.self, from: try await post("/api/folders/bookmark",
+                                                                      ["host": host, "path": path, "on": on]))
+        if let e = r.error { throw Failure.server(400, e) }
+        return r.bookmarks ?? []
+    }
+
+    /// Where a Claude Code or Codex chat works, and how much it may do unasked.
+    func chatWork(sid: String) async throws -> ChatWork {
+        let s = sid.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? sid
+        let data = try await run(try request("/api/claude/info?sid=\(s)"))
+        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { throw Failure.decoding("claude/info") }
+        return ChatWork(json: obj)
+    }
+
+    /// Set the machine ("" = this Mac) and folder a chat works in. The Mac
+    /// checks that a folder on itself exists.
+    func setWork(sid: String, host: String, cwd: String, addDirs: [String]? = nil) async throws {
+        var body: [String: Any] = ["sid": sid, "host": host, "cwd": cwd]
+        if let addDirs { body["add_dirs"] = addDirs }
+        struct R: Codable { var error: String? }
+        let data = try await post("/api/claude/cwd", body)
+        if let e = (try? JSONDecoder().decode(R.self, from: data))?.error { throw Failure.server(400, e) }
+    }
+
+    func setPermissionMode(sid: String, mode: PermissionMode) async throws {
+        struct R: Codable { var error: String? }
+        let data = try await post("/api/claude/mode", ["sid": sid, "mode": mode.rawValue])
+        if let e = (try? JSONDecoder().decode(R.self, from: data))?.error { throw Failure.server(400, e) }
     }
 
     // ------------------------------------------------------------ file links

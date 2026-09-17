@@ -5,6 +5,7 @@ import SwiftUI
 struct SplitChats: View {
     @EnvironmentObject var state: AppState
     @State private var selected: String?
+    @State private var newWith = false
 
     var body: some View {
         NavigationSplitView {
@@ -21,10 +22,24 @@ struct SplitChats: View {
             .refreshable { await state.refreshEverything() }
             .toolbar {
                 ToolbarItem {
+                    Button { newWith = true } label: { Image(systemName: "slider.horizontal.3") }
+                        .accessibilityLabel("New chat with…")
+                }
+                ToolbarItem {
                     Button {
                         Task { selected = await state.newChat() }
                     } label: { Image(systemName: "square.and.pencil") }
+                    .keyboardShortcut("n", modifiers: .command)
+                    .accessibilityLabel("New chat")
                 }
+            }
+            .sheet(isPresented: $newWith) {
+                NewChatSheet { sid in selected = sid }
+            }
+            .task {
+                #if DEBUG
+                if ProcessInfo.processInfo.environment["ORBIT_NEW_CHAT_WITH"] != nil { newWith = true }
+                #endif
             }
         } detail: {
             if let selected {

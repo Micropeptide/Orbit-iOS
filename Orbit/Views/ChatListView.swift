@@ -12,6 +12,7 @@ struct ChatListView: View {
     @State private var showArchived = false
     @State private var project: String? = nil        // nil = all projects
     @State private var jump: SearchHit?
+    @State private var newWith = false
 
     /// A full hostname does not fit a phone title bar and says nothing
     /// useful past the first word.
@@ -150,13 +151,22 @@ struct ChatListView: View {
                     .accessibilityLabel("Filter chats")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        Task {
-                            if let sid = await state.newChat() { goToChat = sid }
+                    // tap: a chat like the last one; hold: choose its harness, machine and folder
+                    Menu {
+                        Button {
+                            Task { if let sid = await state.newChat() { goToChat = sid } }
+                        } label: { Label("New chat", systemImage: "square.and.pencil") }
+                        Button { newWith = true } label: {
+                            Label("New chat with…", systemImage: "slider.horizontal.3")
                         }
-                    } label: { Image(systemName: "square.and.pencil") }
+                    } label: {
+                        Image(systemName: "square.and.pencil")
+                    } primaryAction: {
+                        Task { if let sid = await state.newChat() { goToChat = sid } }
+                    }
                     .keyboardShortcut("n", modifiers: .command)
                     .accessibilityLabel("New chat")
+                    .accessibilityHint("Hold for New chat with…")
                 }
             }
             .navigationDestination(item: $goToChat) { ChatView(sid: $0) }
@@ -174,7 +184,13 @@ struct ChatListView: View {
                 }
                 Button("Cancel", role: .cancel) { renaming = nil }
             }
+            .sheet(isPresented: $newWith) {
+                NewChatSheet { sid in goToChat = sid }
+            }
             .task {
+                #if DEBUG
+                if ProcessInfo.processInfo.environment["ORBIT_NEW_CHAT_WITH"] != nil { newWith = true }
+                #endif
                 await state.refreshRunning()
                 Cache.prune(keeping: state.chats.map(\.id))
             }
