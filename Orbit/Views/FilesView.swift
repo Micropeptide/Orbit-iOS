@@ -70,7 +70,7 @@ struct FilesView: View {
             .refreshable { await load() }
             .task { await load() }
             .quickLookPreview($preview)
-            .sheet(item: $typed) { TypedFilePreview(file: $0) }
+            .sheet(item: $typed) { TypedFilePreview(file: $0, server: state.server) }
             .sheet(item: $shareURL) { url in
                 ActivityView(items: [url]).ignoresSafeArea()
             }
