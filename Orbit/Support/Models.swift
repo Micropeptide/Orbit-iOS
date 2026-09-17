@@ -318,6 +318,9 @@ enum StreamEvent {
     case question(AskQuestion)
     case approvalPrompt(ApprovalPrompt)
     case roundLimit(String)
+    /// A plan's usage limit stopped the answer (`notice {kind:'limit'}`). Kept
+    /// apart from other notices: it is highlighted and worth a notification.
+    case usageLimit(String)
     case error(String)
     case end(sid: String?, title: String?)
 }

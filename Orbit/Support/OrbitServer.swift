@@ -468,6 +468,8 @@ actor OrbitServer {
         case "status":         return .status(p as? String ?? str("msg"))
         case "notice":
             let msg = p as? String ?? str("msg")
+            // a plan's allowance ran out: its own event, so it can stand out and notify
+            if str("kind") == "limit" { return .usageLimit(msg) }
             return msg.isEmpty ? nil : .notice(msg)
         // chat actions: a question mid-answer, and an answer that hit its limit
         case "question":

@@ -26,9 +26,15 @@ struct ModelsKeysView: View {
                                     Text("\(p.statusLine) · \(p.models.count) models")
                                 }
                                 .font(.caption).foregroundStyle(.secondary)
-                                if let live = p.accounts.first(where: \.active)?.live, live.error == nil,
+                                // the account the pickers report on: the first with a key
+                                // that is not used up, not only the one marked in use
+                                if let until = p.usedUpUntil {
+                                    Text("used up until " + until.formatted(date: .abbreviated, time: .shortened))
+                                        .font(.caption2).foregroundStyle(.orange)
+                                } else if let a = p.reportingAccount, let live = a.live, live.error == nil,
                                    !live.windows.isEmpty {
-                                    Text(live.windows.map { "\($0.window.left)% \($0.name.lowercased())" }
+                                    Text((p.accounts.count > 1 ? "\(a.label): " : "")
+                                         + live.windows.map { "\($0.window.left)% \($0.name.lowercased())" }
                                             .joined(separator: " · ") + " left")
                                         .font(.caption2).foregroundStyle(.secondary)
                                 }
@@ -40,7 +46,8 @@ struct ModelsKeysView: View {
                 } footer: {
                     Text("One list for every mode. Keys are stored on the Mac and sent only to their "
                          + "provider; this phone never reads them back."
-                         + (o.gatewayError.map { " The gateway is not running: \($0)" } ?? ""))
+                         + (o.gatewayError.map { " The gateway is not running: \($0)" } ?? "")
+                         + (o.gatewayStats.map { $0.requests > 0 ? " Gateway since it started: \($0.text)." : "" } ?? ""))
                 }
 
                 Section {
@@ -80,6 +87,9 @@ struct ModelsKeysView: View {
         do {
             let o = try await state.requireServer().harness()
             overview = o
+            // the picker reads the same figures: no need for it to ask again
+            state.usage.overview = o
+            state.usage.overviewAt = Date()
             proxy = o.proxy ?? ""
             error = nil
         } catch { self.error = error.localizedDescription }
@@ -261,7 +271,9 @@ struct ProviderDetailView: View {
                             .font(.caption).foregroundStyle(.orange)
                     }
                     if let live = a.live { LiveUsageView(live: live) }
-                    if let s = a.monthSpent, s > 0 {
+                    if let u = a.usage, u.requests > 0, let long = u.longText {
+                        Text("Through Orbit — " + long).font(.caption).foregroundStyle(.secondary)
+                    } else if let s = a.monthSpent, s > 0 {
                         Text(String(format: "$%.2f this month through Orbit", s))
                             .font(.caption).foregroundStyle(.secondary)
                     }
@@ -342,6 +354,9 @@ struct ProviderDetailView: View {
                                   m.context.map { "\($0 / 1000)k" } ?? ""]
                                     .filter { !$0.isEmpty }.joined(separator: " · "))
                                 .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                            if let u = m.usage, u.requests > 0, let long = u.longText {
+                                Text(long).font(.caption2).foregroundStyle(.secondary)
+                            }
                         }
                     }
                     HStack {
