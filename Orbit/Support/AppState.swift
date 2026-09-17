@@ -56,6 +56,8 @@ final class AppState: ObservableObject {
     @Published var probing: Set<String> = []
     /// Whether the app is in the background, so a finished answer can announce itself.
     var backgrounded = false
+    /// Set when the app went to the background, cleared when it is back in front.
+    var wentToBackground = false
     var graceTask: UIBackgroundTaskIdentifier = .invalid
 
     // the answer in flight --------------------------------------------------
@@ -96,6 +98,8 @@ final class AppState: ObservableObject {
     private(set) var server: OrbitServer?
     private var streamTask: Task<Void, Never>?
     private var pollTask: Task<Void, Never>?
+    /// Which chat's answer a poll loop is following right now (nil when none is running).
+    private var pollingSid: String?
     /// Watches the open chat for changes made elsewhere — the Mac's browser,
     /// another phone — and pulls them in. The count of raw messages on the
     /// Mac is the thing compared; it moves when anyone sends or answers.
@@ -331,6 +335,9 @@ final class AppState: ObservableObject {
         }
         do {
             let d = try await server.chat(id)
+            // you may have moved on while it loaded: this chat is no longer the one on screen
+            guard openChat == nil || openChat?.sid == id else { return }
+            if streaming, let live = liveSid, live != id { detachLive() }
             openChat = d
             chatExtras.planMode = d.plan_mode ?? false
             var fresh = d.messages
@@ -345,7 +352,7 @@ final class AppState: ObservableObject {
             learnPlan(id, from: fresh)
             await loadModels()
             // already attached (SSE or poll) when it is the chat we are watching
-            if d.running == true, liveSid != id { await rejoin(id) }
+            if d.running == true, liveSid != id, openChat?.sid == id { await rejoin(id) }
             watch(id, loaded: d.n)
             await loadQueue()
         } catch {
@@ -364,11 +371,18 @@ final class AppState: ObservableObject {
                 try? await Task.sleep(nanoseconds: 4_000_000_000)
                 guard let self, !Task.isCancelled, self.openChat?.sid == id,
                       !self.backgrounded, let server = self.server else { continue }
-                guard let s = try? await server.stamp(id) else { continue }
+                guard let s = try? await server.stamp(id), self.openChat?.sid == id else { continue }
                 if self.streaming {
                     self.watchedCount = s.n                                  // our own turn moves it
-                    if s.running, self.streamTask != nil, Date().timeIntervalSince(self.lastLiveEvent) > 25 {
+                    // a stream silent for well over a long tool call while the Mac still answers
+                    // has died without saying so: follow the answer by polling instead
+                    if s.running, self.liveSid == id, self.streamTask != nil,
+                       Date().timeIntervalSince(self.lastLiveEvent) > 75 {
                         await self.resyncLive()
+                    }
+                    // nothing is listening (a poll that gave up) yet the answer is marked live
+                    if !s.running, self.liveSid == id, self.streamTask == nil, self.pollingSid != id {
+                        self.finishLive(sid: id)
                     }
                     continue
                 }
@@ -451,13 +465,22 @@ final class AppState: ObservableObject {
     /// background, where the stream has usually died without saying so.
     func resyncLive() async {
         guard let server, streaming, let sid = liveSid else { return }
-        guard (try? await server.liveDetail(sid).running) == true else {
+        // a stream that spoke moments ago is alive: leave it be (it carries what polling cannot --
+        // sources, warnings, notices, alerts)
+        if streamTask != nil, Date().timeIntervalSince(lastLiveEvent) < 10 { return }
+        let running = (try? await server.liveDetail(sid).running) == true
+        guard liveSid == sid, openChat?.sid == sid else { return }     // you moved on meanwhile
+        streamTask?.cancel(); streamTask = nil
+        guard running else {
             // it finished while we were not listening: show what it wrote
             finishLive(sid: sid)
-            await open(sid)
             return
         }
-        streamTask?.cancel(); streamTask = nil
+        // start the polled view from what the Mac has saved, so steps the stream already
+        // showed are not drawn twice
+        flushText()
+        liveSteps = []; liveText = ""; liveThinking = ""; liveRuns = []; liveTools = []
+        if let d = try? await server.peek(sid), liveSid == sid, openChat?.sid == sid { messages = d.messages }
         await rejoin(sid)
     }
     private var pendingText = ""
@@ -465,6 +488,9 @@ final class AppState: ObservableObject {
 
     private func beginLive(for sid: String) {
         askForNotificationsIfUseful()
+        // one listener per answer: an old stream or poll left over would draw into this one
+        streamTask?.cancel(); pollTask?.cancel(); pollTask = nil
+        lastLiveEvent = Date()
         liveSid = sid
         streaming = true
         flushTask?.cancel(); flushTask = nil
@@ -628,7 +654,9 @@ final class AppState: ObservableObject {
 
     private func finishLive(sid: String) {
         flushText()
-        guard liveSid == sid || liveSid == nil else { return }
+        // only the answer this screen is watching: finishing another chat's answer used to add
+        // its steps to the chat on screen and cache them under the wrong chat
+        guard liveSid == sid else { return }
         liveSid = nil
         let steps = liveSteps + [currentStep()].compactMap { $0 }
         if !steps.isEmpty {
@@ -654,28 +682,33 @@ final class AppState: ObservableObject {
         liveSid = sid
         streaming = true
         liveStatus = "picking up an answer already running"
+        lastLiveEvent = Date()
         pollTask?.cancel()
         pollTask = Task {
-            var step: Int? = nil
+            var step = -1                       // not seen yet; the Mac leaves "step" out for the first
             var misses = 0
+            var gaveUp = false
+            pollingSid = sid
+            defer { if pollingSid == sid { pollingSid = nil } }
             while !Task.isCancelled, liveSid == sid {
                 // one failed poll (a phone between networks) is not the end of the answer
                 guard let s = try? await server.liveDetail(sid) else {
                     misses += 1
-                    if misses >= 8 { break }
+                    if misses >= 8 { gaveUp = true; break }
                     try? await Task.sleep(nanoseconds: 1_500_000_000)
                     continue
                 }
+                guard !Task.isCancelled, liveSid == sid else { break }
                 misses = 0
                 lastLiveEvent = Date()
                 // The Mac keeps only the step being written. When it moves on,
                 // the finished step is in the saved chat: read that again, or
                 // its text would vanish from the screen until the answer ends.
-                if let n = s.step, let seen = step, n != seen,
-                   let d = try? await server.peek(sid) {
+                let n = s.step ?? 0
+                if step >= 0, n != step, let d = try? await server.peek(sid), liveSid == sid {
                     messages = d.messages
                 }
-                step = s.step ?? step
+                step = n
                 await pickUpPrompts(sid)            // a question or approval raised elsewhere
                 liveText = s.content
                 liveThinking = s.thinking
@@ -691,12 +724,14 @@ final class AppState: ObservableObject {
                 }
                 if !s.content.isEmpty { liveStatus = "" }
                 if !s.running {
-                    finishLive(sid: sid)
-                    await open(sid)
+                    finishLive(sid: sid)            // it reloads the saved chat and follows the queue
                     break
                 }
                 try? await Task.sleep(nanoseconds: 700_000_000)
             }
+            // polling gave up (no network for a while): don't leave the chat stuck "answering" --
+            // the watch loop joins the answer again if it is still running when the Mac answers
+            if gaveUp, liveSid == sid { finishLive(sid: sid) }
         }
     }
 

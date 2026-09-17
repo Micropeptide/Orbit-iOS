@@ -16,6 +16,10 @@ struct ChatView: View {
     /// leave the view parked past the end of a finished answer, which looked blank.
     @State private var following = true
     @State private var viewportHeight: CGFloat = 800
+    /// Draw lazily only in very long chats. Decided from the saved messages with a gap between
+    /// the two thresholds, so an answer finishing (or streaming) never flips it mid-read --
+    /// flipping rebuilt the whole transcript.
+    @State private var lazyTranscript = false
     /// Bumped by the "Latest" button, which lives in the composer, away from the scroll proxy.
     @State private var scrollDownRequest = 0
     @EnvironmentObject var state: AppState
@@ -155,7 +159,7 @@ struct ChatView: View {
                 // list, a big table) and parked the view past the end, so the chat looked blank.
                 // Only very long chats, where drawing every row costs too much, stay lazy.
                 Group {
-                    if state.messages.count + state.liveSteps.count <= 80 {
+                    if !lazyTranscript {
                         VStack(alignment: .leading, spacing: 18) { transcriptContent }
                     } else {
                         LazyVStack(alignment: .leading, spacing: 18) { transcriptContent }
@@ -320,6 +324,9 @@ struct ChatView: View {
     .onChange(of: state.chatExtras.question?.id) { _, _ in follow(proxy) }
     .onChange(of: state.chatExtras.approval?.id) { _, _ in follow(proxy) }
     .onChange(of: scrollDownRequest) { _, _ in following = true; newBelow = false; scroll(proxy) }
+    .onChange(of: state.messages.count, initial: true) { _, n in
+        if n > 110 { lazyTranscript = true } else if n < 70 { lazyTranscript = false }
+    }
     }
 
     /// Keeps up with a growing answer only while you are at the bottom; otherwise marks
