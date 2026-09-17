@@ -84,7 +84,7 @@ final class SlashController: ObservableObject {
         ("/scheduled", "messages and tasks for later"), ("/files", "files Orbit made or you gave it"),
         ("/rename", "rename this chat: /rename <title>"),
         ("/later", "send later: /later 21:30 <message>, /later tomorrow 9am …, /later daily 8:00 …"),
-        ("/tasks", "everything scheduled or waiting — messages and tasks"),
+        ("/tasks", "everything running in the background — answers, queued messages, shell jobs"),
         ("/plan", "plan mode: it may read and think but change nothing"),
         ("/build", "leave plan mode: it may make changes again"),
         ("/export", "download this chat as markdown"),
@@ -188,7 +188,7 @@ final class SlashController: ObservableObject {
                 return "/later " + rest
             }
             Task { _ = await state.sendLaterParsed(rest) }
-        case "/tasks":     state.tab = "scheduled"
+        case "/tasks":     state.presentTasks()
         case "/plan", "/build":
             let on = head.lowercased() == "/plan"
             Task { if state.chatExtras.planMode != on { await state.setPlanMode(on) } }

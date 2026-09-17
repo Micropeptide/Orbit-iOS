@@ -97,6 +97,8 @@ struct ChatListView: View {
             .navigationBarTitleDisplayMode(.inline)
             .searchable(text: $search, prompt: "Search chats and messages")
             .onChange(of: search) { _, q in runSearch(q) }
+            // a new chat starts in the project you are looking at, as on the Mac
+            .onChange(of: project, initial: true) { _, p in state.composerExtras.projectFilter = p }
             .navigationDestination(for: String.self) { ChatView(sid: $0) }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
