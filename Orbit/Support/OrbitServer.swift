@@ -605,6 +605,19 @@ actor OrbitServer {
         return (url, r.kind)
     }
 
+    // ------------------------------------------------------------ for extensions
+
+    /// An authorised request, for endpoints defined in `OrbitServer+*.swift` files.
+    func authorisedRequest(_ path: String, method: String = "GET",
+                           body: [String: Any]? = nil) throws -> URLRequest {
+        try request(path, method: method, body: body)
+    }
+
+    /// Run a request built by `authorisedRequest`, with the usual error mapping.
+    func perform(_ req: URLRequest) async throws -> Data {
+        try await run(req)
+    }
+
     /// A link the Mac handed out, made absolute. `/fs/` links carry their own permission.
     func absolute(_ path: String) -> URL? {
         guard let base = pairing.base else { return nil }

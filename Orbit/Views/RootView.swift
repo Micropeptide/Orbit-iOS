@@ -6,7 +6,7 @@ struct RootView: View {
     @AppStorage("theme") private var theme = "system"
     @State private var showSample = false
 
-    /// Development only: `ORBIT_TAB=scheduled|files|settings` opens on that tab so the
+    /// Development only: `ORBIT_TAB=scheduled|files|library|settings` opens on that tab so the
     /// simulator can be screenshotted without a finger. Compiled out of release.
     private static var initialTab: String {
         #if DEBUG
@@ -36,6 +36,9 @@ struct RootView: View {
                     FilesView()
                         .tabItem { Label("Files", systemImage: "folder") }
                         .tag("files")
+                    LibraryView()
+                        .tabItem { Label("Library", systemImage: "books.vertical") }
+                        .tag("library")
                     SettingsView()
                         .tabItem { Label("Settings", systemImage: "gearshape") }
                         .tag("settings")
