@@ -184,6 +184,7 @@ extension AppState {
     func refreshRunningState() async {
         guard let server else { return }
         if let r = try? await server.runningState() {
+            noteRunningState(running: r.running, waiting: r.waiting)
             runningChats = r.running
             chatExtras.waiting = r.waiting
         }

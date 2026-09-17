@@ -249,6 +249,7 @@ struct ChatMenuItems: View {
             Button(role: .destructive) { model.confirmBurn = true } label: {
                 Label("Burn this chat", systemImage: "flame")
             }
+            .disabled(state.streaming)
         }
     }
 }
