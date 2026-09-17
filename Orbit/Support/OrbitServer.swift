@@ -458,6 +458,11 @@ actor OrbitServer {
         case "interjection":   return .status("reading your note")
         case "queued":         return .status("waiting for another chat to finish")
         case "dequeued":       return .status("its turn — starting")
+        // the chat was already answering: the Mac queued this message, and starts it
+        // by itself once the answer running now is done
+        case "queued_message":
+            return .content("Queued — it starts by itself when the answer running now is done.")
+        case "interjected":    return .content("Sent in — it reads this at its next step.")
         case "retry":          return .status("model error — retrying")
         case "subtask":
             let d = str("description")
