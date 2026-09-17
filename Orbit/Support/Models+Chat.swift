@@ -277,13 +277,14 @@ struct ProjectDetail: Identifiable, Hashable {
 
 /// Which chats the list shows.
 enum ChatFilter: String, CaseIterable, Identifiable {
-    case active, pinned, archived, attention
+    case active, pinned, archived, all, attention
     var id: String { rawValue }
     var label: String {
         switch self {
         case .active: return "Active"
         case .pinned: return "Pinned"
         case .archived: return "Archived"
+        case .all: return "All"
         case .attention: return "Needs attention"
         }
     }
@@ -292,6 +293,7 @@ enum ChatFilter: String, CaseIterable, Identifiable {
         case .active: return "tray"
         case .pinned: return "pin"
         case .archived: return "archivebox"
+        case .all: return "tray.2"
         case .attention: return "exclamationmark.circle"
         }
     }

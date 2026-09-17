@@ -5,6 +5,8 @@ struct RootView: View {
     @Environment(\.horizontalSizeClass) private var width
     @AppStorage("theme") private var theme = "system"
     @State private var showSample = false
+    /// The welcome tips are shown once, after this phone first pairs.
+    @AppStorage("orbit.tipsShown") private var tipsShown = false
 
     /// Development only: `ORBIT_TAB=scheduled|files|library|settings` opens on that tab so the
     /// simulator can be screenshotted without a finger. Compiled out of release.
@@ -43,11 +45,24 @@ struct RootView: View {
                         .tabItem { Label("Settings", systemImage: "gearshape") }
                         .tag("settings")
                 }
+                // `/tasks`, from anywhere: set state.work.showTasks (AppState+Work.swift)
+                .sheet(isPresented: $state.work.showTasks) { TasksSheet() }
+                .sheet(isPresented: $state.work.showTips) {
+                    OnboardingTips { tipsShown = true }
+                }
             } else {
                 PairingView()
             }
         }
         .animation(.default, value: state.isPaired)
+        .onChange(of: state.isPaired) { _, paired in
+            // a moment after the list appears, not over the pairing screen as it goes
+            guard paired, !tipsShown else { return }
+            Task {
+                try? await Task.sleep(nanoseconds: 700_000_000)
+                if state.isPaired, !tipsShown { state.work.showTips = true }
+            }
+        }
         }
         .preferredColorScheme(Appearance.scheme(theme))
         .onAppear {

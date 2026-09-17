@@ -10,16 +10,13 @@ struct SplitChats: View {
 
     var body: some View {
         NavigationSplitView {
-            List(sorted, selection: $selected) { chat in
-                NavigationLink(value: chat.id) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(chat.displayTitle).lineLimit(1)
-                        Text("\(chat.n) messages").font(.caption2)
-                            .foregroundStyle(.secondary)
-                        ChatStatusBadge(status: state.status(of: chat, seen: listModel.seen))
-                    }
+            List(selection: $selected) {
+                ForEach(ChatListSplit.mine(sorted, running: state.runningChats)) { row($0) }
+                ChatPagingRow()
+                // sessions other agents began, folded by agent (Views/Chat/ChatListExtras.swift)
+                ForEach(ChatListSplit.external(sorted, running: state.runningChats), id: \.0) { src, rows in
+                    ExternalChatSection(source: src, chats: rows) { row($0) }
                 }
-                .contextMenu { ChatRowMenu(chat: chat, model: listModel) }
             }
             .navigationTitle("Chats")
             .refreshable { await state.refreshEverything() }
@@ -71,6 +68,21 @@ struct SplitChats: View {
                                        systemImage: "bubble.left.and.bubble.right")
             }
         }
+    }
+
+    private func row(_ chat: ChatSummary) -> some View {
+        NavigationLink(value: chat.id) {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 5) {
+                    Text(chat.displayTitle).lineLimit(1).italic(chat.external == true)
+                    if let host = chat.host { ChatHostBadge(host: host) }
+                }
+                Text("\(chat.n) messages").font(.caption2)
+                    .foregroundStyle(.secondary)
+                ChatStatusBadge(status: state.status(of: chat, seen: listModel.seen))
+            }
+        }
+        .contextMenu { ChatRowMenu(chat: chat, model: listModel) }
     }
 
     private var sorted: [ChatSummary] {

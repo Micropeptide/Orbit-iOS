@@ -74,8 +74,14 @@ struct WorkSheet: View {
     @State private var loaded = false
     @State private var saving = false
     @State private var error: String?
+    // resume command, session details and extra folders (Views/Chat/ChatAgentDetails.swift)
+    @State private var info: ChatAgentInfo?
+    @State private var addDirs: [String] = []
 
     private var startFolder: String { work.cwd ?? work.cwdPref ?? "" }
+    /// The Mac replaces a chat's extra folders with every folder change, so they
+    /// are only sent once known — never cleared by a save made before they loaded.
+    private var dirsChanged: Bool { info != nil && addDirs != (info?.addDirs ?? []) }
     private var placeChanged: Bool {
         host != (work.host ?? "")
             || folder.trimmingCharacters(in: .whitespacesAndNewlines) != startFolder
@@ -105,6 +111,10 @@ struct WorkSheet: View {
                                     + (work.host ?? "this Mac")
                                     + ". Start a new chat to work on another machine.")
 
+                if info != nil {
+                    AlsoAllowSection(dirs: $addDirs, host: host, harness: work.harness)
+                }
+
                 PermissionModeSection(mode: $mode, harness: work.harness)
 
                 if let error {
@@ -112,7 +122,12 @@ struct WorkSheet: View {
                         Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
                     }
                 }
+
+                if let info {
+                    ChatAgentDetailSections(sid: sid, info: info)
+                }
             }
+            .modifier(ToastOverlay())
             .navigationTitle("Where this chat works")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -122,7 +137,7 @@ struct WorkSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     if saving { ProgressView() } else {
                         Button("Save") { Task { await save() } }
-                            .disabled(!loaded || (!placeChanged && mode == work.mode))
+                            .disabled(!loaded || (!placeChanged && !dirsChanged && mode == work.mode))
                     }
                 }
             }
@@ -133,7 +148,12 @@ struct WorkSheet: View {
                 folder = startFolder
                 mode = work.mode
                 loaded = true
-                if state.remoteHosts.isEmpty { await state.loadHosts() }
+                async let hosts: Void = state.remoteHosts.isEmpty ? state.loadHosts() : ()
+                if let server = state.server, let i = try? await server.chatAgentInfo(sid: sid) {
+                    info = i
+                    addDirs = i.addDirs
+                }
+                await hosts
             }
         }
     }
@@ -144,9 +164,10 @@ struct WorkSheet: View {
         error = nil
         defer { saving = false }
         do {
-            if placeChanged {
+            if placeChanged || dirsChanged {
                 try await server.setWork(sid: sid, host: work.started ? (work.host ?? "") : host,
-                                         cwd: folder.trimmingCharacters(in: .whitespacesAndNewlines))
+                                         cwd: folder.trimmingCharacters(in: .whitespacesAndNewlines),
+                                         addDirs: info != nil ? addDirs : nil)
             }
             if mode != work.mode {
                 try await server.setPermissionMode(sid: sid, mode: mode)

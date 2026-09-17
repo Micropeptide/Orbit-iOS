@@ -25,7 +25,11 @@ struct ChatListView: View {
         return (first?.isEmpty == false ? first! : raw)
     }
 
-    private var shown: [ChatSummary] {
+    /// Your chats. Sessions other agents began have sections of their own below them.
+    private var shown: [ChatSummary] { ChatListSplit.mine(matching, running: state.runningChats) }
+
+    /// Every chat that passes the filters, yours and other agents' alike.
+    private var matching: [ChatSummary] {
         let base = state.chats.filter { passes($0) }
                               .filter { project == nil || $0.project == project }
                               .filter { tagFilter == nil || ($0.tags ?? []).contains(tagFilter!) }
@@ -42,6 +46,8 @@ struct ChatListView: View {
         NavigationStack {
             VStack(spacing: 0) {
                 ConnectionBanner()
+                ChatStatusChips(chats: ChatListSplit.mine(state.chats, running: state.runningChats),
+                                filter: $filter)
                 List {
                     // Titles match first and instantly; the server searches the
                     // text of every message a moment later.
@@ -71,38 +77,18 @@ struct ChatListView: View {
                     }
                     ForEach(dayGroups, id: \.0) { day, chats in
                      Section(day) {
-                      ForEach(chats) { chat in
-                        NavigationLink(value: chat.id) {
-                            row(chat)
-                        }
-                        .swipeActions(edge: .trailing) {
-                            Button(role: .destructive) {
-                                Task { await state.binWithUndo(chat.id) }
-                            } label: { Label("Bin", systemImage: "trash") }
-                        }
-                        .swipeActions(edge: .leading) {
-                            Button {
-                                Task { await state.setPinned(chat.id, !(chat.pinned ?? false)) }
-                            } label: {
-                                Label(chat.pinned == true ? "Unpin" : "Pin",
-                                      systemImage: chat.pinned == true ? "pin.slash" : "pin")
-                            }
-                            .tint(.orange)
-                            Button {
-                                Task { await state.setArchived(chat.id, !(chat.archived ?? false)) }
-                            } label: {
-                                Label(chat.archived == true ? "Unarchive" : "Archive",
-                                      systemImage: "archivebox")
-                            }
-                            .tint(.gray)
-                        }
-                        .contextMenu {
-                            ChatRowMenu(chat: chat, model: listModel)
-                        }
-                      }
+                      ForEach(chats) { chat in listRow(chat) }
                      }
                     }
                     if shown.isEmpty { empty }
+                    ChatPagingRow()
+                    // conversations that began outside Orbit: each agent in its own section, folded until opened
+                    ForEach(ChatListSplit.external(matching, running: state.runningChats), id: \.0) { src, rows in
+                        ExternalChatSection(source: src, chats: rows,
+                                            forceOpen: !search.trimmingCharacters(in: .whitespaces).isEmpty) {
+                            listRow($0)
+                        }
+                    }
                 }
                 .listStyle(.plain)
                 .refreshable { await state.refreshEverything() }
@@ -120,7 +106,9 @@ struct ChatListView: View {
                                 Label(f.label, systemImage: f.icon).tag(f)
                             }
                         }
-                        let tags = Array(Set(state.chats.flatMap { $0.tags ?? [] })).sorted()
+                        // the other agents' own tags are their sections already
+                        let tags = Array(Set(state.chats.flatMap { $0.tags ?? [] }))
+                            .filter { !["claude-qwen", "codex", "opencode"].contains($0) }.sorted()
                         if !tags.isEmpty {
                             Picker("Tag", selection: $tagFilter) {
                                 Label("Any tag", systemImage: "tag").tag(String?.none)
@@ -219,6 +207,7 @@ struct ChatListView: View {
         case .active: return c.archived != true
         case .pinned: return c.pinned == true
         case .archived: return c.archived == true
+        case .all: return true
         case .attention:
             return state.status(of: c, seen: listModel.seen).needsAttention
         }
@@ -258,6 +247,37 @@ struct ChatListView: View {
             .map { ($0.key, $0.value) }
     }
 
+    /// A row with its swipe actions and menu — the same for your chats and other agents' sessions.
+    private func listRow(_ chat: ChatSummary) -> some View {
+        NavigationLink(value: chat.id) {
+            row(chat)
+        }
+        .swipeActions(edge: .trailing) {
+            Button(role: .destructive) {
+                Task { await state.binWithUndo(chat.id) }
+            } label: { Label("Bin", systemImage: "trash") }
+        }
+        .swipeActions(edge: .leading) {
+            Button {
+                Task { await state.setPinned(chat.id, !(chat.pinned ?? false)) }
+            } label: {
+                Label(chat.pinned == true ? "Unpin" : "Pin",
+                      systemImage: chat.pinned == true ? "pin.slash" : "pin")
+            }
+            .tint(.orange)
+            Button {
+                Task { await state.setArchived(chat.id, !(chat.archived ?? false)) }
+            } label: {
+                Label(chat.archived == true ? "Unarchive" : "Archive",
+                      systemImage: "archivebox")
+            }
+            .tint(.gray)
+        }
+        .contextMenu {
+            ChatRowMenu(chat: chat, model: listModel)
+        }
+    }
+
     private func row(_ chat: ChatSummary) -> some View {
         HStack(spacing: 12) {
             ZStack {
@@ -274,9 +294,11 @@ struct ChatListView: View {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 5) {
                     Text(chat.displayTitle).lineLimit(1).font(.body)
+                        .italic(chat.external == true)
                     if chat.pinned == true {
                         Image(systemName: "pin.fill").font(.caption2).foregroundStyle(.orange)
                     }
+                    if let host = chat.host { ChatHostBadge(host: host) }
                 }
                 Text(relative(chat.date) + (chat.n > 0 ? " · \(chat.n) messages" : " · empty"))
                     .font(.caption)

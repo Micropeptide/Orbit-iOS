@@ -14,6 +14,170 @@ final class ChatListModel: ObservableObject {
     func refreshSeen() { seen = SeenChats.all() }
 }
 
+// ------------------------------------------------------------------ other agents, status, paging
+
+/// Your chats, and the sessions other agents began. Those go in their own
+/// sections — unless one of your chats that runs through such an agent is
+/// answering right now, which keeps it in your list.
+enum ChatListSplit {
+    static func mine(_ chats: [ChatSummary], running: Set<String>) -> [ChatSummary] {
+        chats.filter { ExternalSource(chat: $0) == nil || ($0.external != true && running.contains($0.id)) }
+    }
+
+    static func external(_ chats: [ChatSummary], running: Set<String>) -> [(ExternalSource, [ChatSummary])] {
+        let mineIDs = Set(mine(chats, running: running).map(\.id))
+        return ExternalSource.allCases.compactMap { src in
+            let rows = chats.filter { !mineIDs.contains($0.id) && ExternalSource(chat: $0) == src }
+            return rows.isEmpty ? nil : (src, rows)
+        }
+    }
+}
+
+/// Which "From Claude Code / Codex / OpenCode" sections are open. Folded until
+/// you open one, and remembered.
+enum ExternalSectionsOpen {
+    private static let key = "orbit.extSectionsOpen"
+    static func isOpen(_ s: ExternalSource) -> Bool {
+        (UserDefaults.standard.stringArray(forKey: key) ?? []).contains(s.rawValue)
+    }
+    static func toggle(_ s: ExternalSource) {
+        var open = Set(UserDefaults.standard.stringArray(forKey: key) ?? [])
+        if open.contains(s.rawValue) { open.remove(s.rawValue) } else { open.insert(s.rawValue) }
+        UserDefaults.standard.set(Array(open).sorted(), forKey: key)
+    }
+}
+
+/// A folding section of sessions one other agent began.
+struct ExternalChatSection<Row: View>: View {
+    let source: ExternalSource
+    let chats: [ChatSummary]
+    /// While searching, every section is open.
+    var forceOpen = false
+    @ViewBuilder var row: (ChatSummary) -> Row
+    @State private var open = false
+
+    var body: some View {
+        Section {
+            if open || forceOpen {
+                ForEach(chats) { row($0) }
+            }
+        } header: {
+            Button {
+                ExternalSectionsOpen.toggle(source)
+                withAnimation { open = ExternalSectionsOpen.isOpen(source) }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "chevron.right")
+                        .font(.caption2.weight(.bold))
+                        .rotationEffect(.degrees(open || forceOpen ? 90 : 0))
+                    Text(source.label)
+                    Text("\(chats.count)").foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("\(source.label), \(chats.count) sessions")
+            .accessibilityHint(source.tip)
+            .accessibilityAddTraits(.isHeader)
+        } footer: {
+            if open || forceOpen {
+                Text(source.tip).font(.caption2)
+            }
+        }
+        .onAppear { open = ExternalSectionsOpen.isOpen(source) }
+    }
+}
+
+/// What is going on, at a glance: waiting for you, answering, queued. Tapping
+/// one shows only the chats that need attention; tapping again shows them all.
+struct ChatStatusChips: View {
+    @EnvironmentObject var state: AppState
+    let chats: [ChatSummary]
+    @Binding var filter: ChatFilter
+
+    var body: some View {
+        let ids = Set(chats.map(\.id))
+        let waiting = state.chatExtras.waiting.intersection(ids).count
+        let answering = state.runningChats.intersection(ids).count
+        let queued = chats.filter { ($0.queued ?? 0) > 0 }.count
+        if waiting + answering + queued > 0 {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    if waiting > 0 { chip("! \(waiting) waiting for you", tint: .orange, spinner: false) }
+                    if answering > 0 { chip("\(answering) answering", tint: .accentColor, spinner: true) }
+                    if queued > 0 {
+                        chip("\(queued) with queued message\(queued == 1 ? "" : "s")", tint: .purple, spinner: false)
+                    }
+                }
+                .padding(.horizontal, 14).padding(.vertical, 6)
+            }
+            .background(.bar)
+            .overlay(Divider(), alignment: .bottom)
+        }
+    }
+
+    private func chip(_ text: String, tint: Color, spinner: Bool) -> some View {
+        Button {
+            withAnimation { filter = filter == .attention ? .active : .attention }
+        } label: {
+            HStack(spacing: 5) {
+                if spinner { ProgressView().controlSize(.mini) }
+                Text(text).font(.caption.weight(.medium))
+            }
+            .padding(.horizontal, 10).padding(.vertical, 5)
+            .foregroundStyle(filter == .attention ? .white : tint)
+            .background(filter == .attention ? AnyShapeStyle(tint) : AnyShapeStyle(tint.opacity(0.14)),
+                        in: .capsule)
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint(filter == .attention ? "Shows every chat" : "Shows only chats that need attention")
+    }
+}
+
+/// The SSH host a chat runs on.
+struct ChatHostBadge: View {
+    let host: String
+
+    var body: some View {
+        Label(host, systemImage: "server.rack")
+            .labelStyle(.titleAndIcon)
+            .font(.caption2.weight(.medium))
+            .lineLimit(1)
+            .padding(.horizontal, 6).padding(.vertical, 1)
+            .foregroundStyle(.teal)
+            .background(Color.teal.opacity(0.12), in: .capsule)
+            .accessibilityLabel("runs on \(host) over SSH")
+    }
+}
+
+/// "Showing 500 of 812 · Show more", under the list when the Mac has more.
+struct ChatPagingRow: View {
+    @EnvironmentObject var state: AppState
+    @State private var loading = false
+
+    var body: some View {
+        if state.moreChatsOnMac > 0 {
+            HStack {
+                Text("Showing \(state.chats.count) of \(state.work.chatTotal ?? state.chats.count)")
+                    .font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                if loading {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Button("Show more") {
+                        loading = true
+                        Task { await state.loadMoreChats(); loading = false }
+                    }
+                    .font(.caption.weight(.semibold))
+                    .buttonStyle(.borderless)
+                }
+            }
+            .listRowSeparator(.hidden)
+        }
+    }
+}
+
 /// A chat's state at a glance: waiting for you, answering, queued, new, scheduled.
 struct ChatStatusBadge: View {
     let status: ChatRowStatus
