@@ -52,6 +52,12 @@ struct ModelPickerView: View {
                             HStack {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(m.display).foregroundStyle(.primary)
+                                    if let op = m.offpeak {
+                                        // cheaper hours: green while it is cheaper, orange when later
+                                        Label(op.shortText, systemImage: op.isActive ? "leaf.fill" : "clock")
+                                            .font(.caption2)
+                                            .foregroundStyle(op.isActive ? Color.green : Color.orange)
+                                    }
                                     if let n = m.note, !n.isEmpty {
                                         Text(n).font(.caption2).foregroundStyle(.secondary)
                                     } else if !m.isReady {
