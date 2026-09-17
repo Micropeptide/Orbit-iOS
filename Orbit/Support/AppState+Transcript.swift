@@ -10,8 +10,11 @@ extension AppState {
     /// Put the open chat back to just before your `index`-th message, then reload it.
     func rewind(toUserIndex index: Int, files: Bool) async -> Bool {
         guard let server, let sid = openChat?.sid, !streaming else { return false }
+        // the message it goes back to, found before the chat reloads without it
+        let target = messages.filter(\.isUser).dropFirst(index).first
         do {
             let r = try await server.rewind(sid: sid, index: index, files: files)
+            if let target { forgetExtras(from: target) }
             await open(sid)
             var note = "Rewound \(r.dropped) message\(r.dropped == 1 ? "" : "s")"
             if files { note += " · \(r.undone.count) file change\(r.undone.count == 1 ? "" : "s") undone" }
