@@ -11,10 +11,16 @@ struct ScheduledView: View {
     @State private var editingMessage: ScheduledMessage?
     @State private var editingTask: ScheduledTask?
     @State private var toast: String?
+    /// "Running now": answers, queued messages and shell jobs (Views/Tasks/RunningNow.swift).
+    @StateObject private var running = RunningNowModel()
+    /// A task waiting for "Run it now?" to be confirmed.
+    @State private var confirmRun: ScheduledTask?
 
     var body: some View {
         NavigationStack {
             List {
+                RunningNowSection(model: running)
+
                 Section {
                     if messages.isEmpty && !loading {
                         Text("None. Hold the send button, or tap Send later above the message box.")
@@ -56,7 +62,7 @@ struct ScheduledView: View {
                                 }
                             }
                             .swipeActions(edge: .leading) {
-                                Button { Task { await runTask(t) } } label: {
+                                Button { confirmRun = t } label: {
                                     Label("Run now", systemImage: "play")
                                 }.tint(.green)
                             }
@@ -65,6 +71,8 @@ struct ScheduledView: View {
                 } header: {
                     Text("Tasks")
                 }
+
+                ClusterJobsSection()
             }
             .listStyle(.insetGrouped)
             .overlay {
@@ -78,7 +86,9 @@ struct ScheduledView: View {
                         .accessibilityLabel("New task")
                 }
             }
-            .refreshable { await load() }
+            .refreshable { await load(); await running.load(state) }
+            // what is running is kept current only while this tab is on screen
+            .task(id: state.pairing?.url ?? "") { await running.poll(state, every: 5) }
             // the pairing can land after this screen first appears. Not tied to the
             // view's own task: switching tabs mid-request must not cancel the read
             .task(id: "\(state.pairing?.url ?? "")|\(state.reachable == true)") {
@@ -108,6 +118,15 @@ struct ScheduledView: View {
                         .padding(.bottom, 12)
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
+            }
+            .confirmationDialog("Run “\(confirmRun.map(Self.taskTitle) ?? "")” now?",
+                                isPresented: Binding(get: { confirmRun != nil }, set: { if !$0 { confirmRun = nil } }),
+                                titleVisibility: .visible, presenting: confirmRun) { t in
+                Button("Run now") { Task { await runTask(t) } }
+                Button("Cancel", role: .cancel) {}
+            } message: { t in
+                Text(t.sid != nil ? "It runs in its chat, as if it were its time."
+                                  : "It runs in a new chat, as if it were its time.")
             }
             .alert("Couldn't do that", isPresented: Binding(
                 get: { failed != nil }, set: { if !$0 { failed = nil } })) {
@@ -178,22 +197,33 @@ struct ScheduledView: View {
         }
     }
 
+    static func taskTitle(_ t: ScheduledTask) -> String {
+        t.name.isEmpty ? String(t.prompt.prefix(40)) : t.name
+    }
+
     private func taskRow(_ t: ScheduledTask) -> some View {
         HStack(alignment: .top, spacing: 12) {
-            Image(systemName: t.enabled ? "calendar.badge.clock" : "pause.circle")
+            Image(systemName: t.isLimitResume ? "hourglass" : t.enabled ? "calendar.badge.clock" : "pause.circle")
                 .font(.title3)
-                .foregroundStyle(t.enabled ? Color.accentColor : .secondary)
+                .foregroundStyle(t.isLimitResume ? Color.orange : t.enabled ? Color.accentColor : .secondary)
                 .frame(width: 28)
             VStack(alignment: .leading, spacing: 3) {
-                Text(t.name.isEmpty ? String(t.prompt.prefix(40)) : t.name)
+                if t.isLimitResume {
+                    Text("Continue after usage limit")
+                        .font(.caption2.weight(.semibold)).foregroundStyle(.orange)
+                }
+                Text(t.isLimitResume ? t.limitResumeChat : Self.taskTitle(t))
                     .font(.body).lineLimit(2)
                     .foregroundStyle(t.enabled ? .primary : .secondary)
-                Text(t.scheduleDescription).font(.caption).foregroundStyle(.secondary)
-                HStack(spacing: 6) {
-                    if let next = t.nextDescription { Text("next: \(next)") }
-                    if let m = state.modelLabel(t.model) { Text("· \(m)").lineLimit(1) }
+                Text(t.isLimitResume && t.enabled
+                     ? "carries on by itself " + (t.at_ts.map { When.describe(Date(timeIntervalSince1970: $0)) } ?? "when it resets")
+                     : t.scheduleDescription)
+                    .font(.caption).foregroundStyle(.secondary)
+                if t.isLimitResume, let why = t.why, !why.isEmpty {
+                    Text(why).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
                 }
-                .font(.caption2).foregroundStyle(.secondary)
+                Text(taskFacts(t).joined(separator: " · "))
+                    .font(.caption2).foregroundStyle(.secondary).lineLimit(3)
                 if let last = t.last_run {
                     HStack(alignment: .firstTextBaseline, spacing: 5) {
                         Image(systemName: t.last_ok == false ? "xmark.circle.fill" : "checkmark.circle.fill")
@@ -211,10 +241,32 @@ struct ScheduledView: View {
         .contentShape(Rectangle())
     }
 
+    /// Next run (or paused, or finished), stops by, model, where it runs, agent —
+    /// the facts the Mac's task list gives under each task's name.
+    private func taskFacts(_ t: ScheduledTask) -> [String] {
+        var out: [String] = []
+        if let next = t.nextDescription { out.append(t.enabled ? "next: \(next)" : next) }
+        else if t.enabled { out.append("finished") }
+        if let s = t.stop_at, !s.isEmpty { out.append("stops by \(s)") }
+        out.append("on " + (state.modelLabel(t.model) ?? (t.sid != nil ? "its chat's model" : "the default model")))
+        if let sid = t.sid {
+            let title = state.chats.first { $0.id == sid }?.displayTitle
+            out.append(title.map { "in its chat “\($0)”" } ?? "in its chat")
+        } else {
+            out.append("new chat each run")
+        }
+        if let p = t.project, !p.isEmpty {
+            out.append("project " + (state.projects.first { $0.id == p }?.name ?? p))
+        }
+        if let a = t.agent, !a.isEmpty { out.append("agent \(a)") }
+        if t.isLimitResume, let n = t.attempt, n > 0 { out.append("attempt \(n + 1)") }
+        return out
+    }
+
     @ViewBuilder
     private func taskMenu(_ t: ScheduledTask) -> some View {
         Button { editingTask = t } label: { Label("Edit", systemImage: "pencil") }
-        Button { Task { await runTask(t) } } label: { Label("Run now", systemImage: "play") }
+        Button { confirmRun = t } label: { Label("Run now", systemImage: "play") }
         if let sid = t.last_sid ?? t.sid {
             Button { state.tab = "chats"; state.deepLink = sid } label: {
                 Label("Open its chat", systemImage: "bubble.left")
@@ -311,7 +363,7 @@ struct ScheduledView: View {
         guard let server = state.server, !t.id.isEmpty else { return }
         do {
             try await server.runTask(t.id)
-            flash("“\(t.name)” is running on your Mac")
+            flash("“\(Self.taskTitle(t))” is running on your Mac")
             try? await Task.sleep(nanoseconds: 1_000_000_000)
             await load()
         } catch { failed = error.localizedDescription }
@@ -346,6 +398,25 @@ struct TaskEditor: View {
     @State private var enabled = true
     @State private var saving = false
     @State private var confirmDelete = false
+    // stops by, where it runs, project and agent — as the Mac's task form has them
+    @State private var stopBy = false
+    @State private var stopAt = Date.now
+    @State private var runsIn = ""
+    @State private var project = ""
+    @State private var agent = ""
+    @State private var agents: [String] = []
+    @State private var confirmRun = false
+
+    /// Chats a task can run in: yours with something in them, not other agents' sessions.
+    private var runnableChats: [ChatSummary] {
+        var list = Array(state.chats.filter { $0.external != true && $0.n > 0 }
+                                    .sorted { $0.mtime > $1.mtime }.prefix(60))
+        if let sid = task.sid, !list.contains(where: { $0.id == sid }),
+           let c = state.chats.first(where: { $0.id == sid }) {
+            list.insert(c, at: 0)
+        }
+        return list
+    }
 
     private var isNew: Bool { task.id.isEmpty }
 
@@ -384,7 +455,51 @@ struct TaskEditor: View {
                 } header: { Text("When") }
 
                 Section {
-                    ModelChoicePicker(defaultLabel: "Default", selection: $model)
+                    Toggle("Stop by a time", isOn: $stopBy)
+                    if stopBy {
+                        DatePicker("Stop by", selection: $stopAt, displayedComponents: .hourAndMinute)
+                    }
+                } footer: {
+                    Text("Optional: the run paces itself to finish by then, and wraps up with a summary if time runs out.")
+                }
+
+                Section {
+                    Picker("Runs in", selection: $runsIn) {
+                        Text("A new chat each time").tag("")
+                        if !runsIn.isEmpty, !runnableChats.contains(where: { $0.id == runsIn }) {
+                            Text("This task's chat").tag(runsIn)
+                        }
+                        ForEach(runnableChats) { c in
+                            Text(c.displayTitle).lineLimit(1).tag(c.id)
+                        }
+                    }
+                    .pickerStyle(.navigationLink)
+                    if !state.projects.isEmpty || !project.isEmpty {
+                        Picker("Project", selection: $project) {
+                            Text("None").tag("")
+                            if !project.isEmpty, !state.projects.contains(where: { $0.id == project }) {
+                                Text(project).tag(project)
+                            }
+                            ForEach(state.projects) { p in Text(p.name).tag(p.id) }
+                        }
+                    }
+                    if !agents.isEmpty || !agent.isEmpty {
+                        Picker("Agent", selection: $agent) {
+                            Text("None").tag("")
+                            if !agent.isEmpty, !agents.contains(agent) { Text(agent).tag(agent) }
+                            ForEach(agents, id: \.self) { Text($0).tag($0) }
+                        }
+                    }
+                } header: {
+                    Text("Where it runs")
+                } footer: {
+                    Text(runsIn.isEmpty ? "Each run starts a chat of its own, where its result lands."
+                                        : "Each run continues that chat, with its history and context.")
+                }
+
+                Section {
+                    ModelChoicePicker(defaultLabel: runsIn.isEmpty ? "The default model" : "The chat's model",
+                                      selection: $model)
                 } footer: {
                     if !isNew, let r = task.last_result, !r.isEmpty {
                         Text("Last result: " + ScheduledView.plain(r).prefix(300))
@@ -393,7 +508,7 @@ struct TaskEditor: View {
 
                 if !isNew {
                     Section {
-                        Button { Task { await onRun(); dismiss() } } label: {
+                        Button { confirmRun = true } label: {
                             Label("Run now", systemImage: "play")
                         }
                         Button(role: .destructive) { confirmDelete = true } label: {
@@ -417,11 +532,20 @@ struct TaskEditor: View {
                     }
                 }
             }
+            .confirmationDialog("Run “\(ScheduledView.taskTitle(task))” now?", isPresented: $confirmRun,
+                                titleVisibility: .visible) {
+                Button("Run now") { Task { await onRun(); dismiss() } }
+                Button("Cancel", role: .cancel) {}
+            }
             .confirmationDialog("Delete this task?", isPresented: $confirmDelete, titleVisibility: .visible) {
                 Button("Delete", role: .destructive) { Task { await onDelete(); dismiss() } }
                 Button("Cancel", role: .cancel) {}
             }
             .onAppear(perform: fill)
+            .task {
+                guard let server = state.server else { return }
+                if let a = try? await server.agents() { agents = a.agents.map(\.name) }
+            }
         }
     }
 
@@ -449,13 +573,28 @@ struct TaskEditor: View {
         weekday = task.weekday ?? 0
         model = task.model ?? ""
         enabled = task.enabled
+        stopBy = !(task.stop_at ?? "").isEmpty
+        if let s = task.stop_at, let d = Self.hhmm.date(from: s),
+           let t = Calendar.current.date(bySettingHour: Calendar.current.component(.hour, from: d),
+                                         minute: Calendar.current.component(.minute, from: d),
+                                         second: 0, of: .now) {
+            stopAt = t
+        } else if let six = Calendar.current.date(bySettingHour: 6, minute: 0, second: 0, of: .now) {
+            stopAt = six
+        }
+        runsIn = task.sid ?? ""
+        project = task.project ?? ""
+        agent = task.agent ?? ""
     }
 
     /// Only what changed, plus the id and prompt (a Mac that predates partial
     /// saves refuses a job without its prompt). A new task sends everything.
     private func changes() -> [String: Any] {
+        // an empty value removes the setting on the Mac
+        let stop = stopBy ? Self.hhmm.string(from: stopAt) : ""
         var full: [String: Any] = ["name": name, "prompt": prompt, "every": every, "enabled": enabled,
-                                   "model": model]
+                                   "model": model, "stop_at": stop, "sid": runsIn,
+                                   "project": project, "agent": agent]
         switch every {
         case "once": full["at_ts"] = once.timeIntervalSince1970
         case "minutes", "hours": full["n"] = n
@@ -468,6 +607,10 @@ struct TaskEditor: View {
         if every != task.every { job["every"] = every }
         if enabled != task.enabled { job["enabled"] = enabled }
         if model != (task.model ?? "") { job["model"] = model }
+        if stop != (task.stop_at ?? "") { job["stop_at"] = stop }
+        if runsIn != (task.sid ?? "") { job["sid"] = runsIn }
+        if project != (task.project ?? "") { job["project"] = project }
+        if agent != (task.agent ?? "") { job["agent"] = agent }
         // when it runs: send the whole of it if any part moved, so the Mac never
         // pairs a new kind with an old time
         let whenKeys = ["at", "at_ts", "n", "weekday"]
