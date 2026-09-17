@@ -9,9 +9,12 @@ struct ChatListView: View {
     @State private var searchTask: Task<Void, Never>?
     @State private var renaming: ChatSummary?
     @State private var newTitle = ""
-    @State private var showArchived = false
     @State private var project: String? = nil        // nil = all projects
     @State private var jump: SearchHit?
+    // filters, tags, projects, status (Views/Chat/ChatListExtras.swift)
+    @State private var filter: ChatFilter = .active
+    @State private var tagFilter: String? = nil
+    @StateObject private var listModel = ChatListModel()
 
     /// A full hostname does not fit a phone title bar and says nothing
     /// useful past the first word.
@@ -22,9 +25,9 @@ struct ChatListView: View {
     }
 
     private var shown: [ChatSummary] {
-        let base = state.chats.filter { showArchived ? $0.archived == true
-                                                     : $0.archived != true }
+        let base = state.chats.filter { passes($0) }
                               .filter { project == nil || $0.project == project }
+                              .filter { tagFilter == nil || ($0.tags ?? []).contains(tagFilter!) }
         let q = search.trimmingCharacters(in: .whitespaces).lowercased()
         let matched = q.isEmpty ? base
             : base.filter { $0.displayTitle.lowercased().contains(q) }
@@ -73,7 +76,7 @@ struct ChatListView: View {
                         }
                         .swipeActions(edge: .trailing) {
                             Button(role: .destructive) {
-                                Task { await state.delete(chat.id) }
+                                Task { await state.binWithUndo(chat.id) }
                             } label: { Label("Bin", systemImage: "trash") }
                         }
                         .swipeActions(edge: .leading) {
@@ -93,25 +96,7 @@ struct ChatListView: View {
                             .tint(.gray)
                         }
                         .contextMenu {
-                            Button {
-                                newTitle = chat.displayTitle; renaming = chat
-                            } label: { Label("Rename", systemImage: "pencil") }
-                            Button {
-                                Task { await state.setPinned(chat.id, !(chat.pinned ?? false)) }
-                            } label: {
-                                Label(chat.pinned == true ? "Unpin" : "Pin",
-                                      systemImage: "pin")
-                            }
-                            Button {
-                                Task { await state.setArchived(chat.id, !(chat.archived ?? false)) }
-                            } label: {
-                                Label(chat.archived == true ? "Unarchive" : "Archive",
-                                      systemImage: "archivebox")
-                            }
-                            Divider()
-                            Button(role: .destructive) {
-                                Task { await state.delete(chat.id) }
-                            } label: { Label("Move to bin", systemImage: "trash") }
+                            ChatRowMenu(chat: chat, model: listModel)
                         }
                       }
                      }
@@ -129,9 +114,29 @@ struct ChatListView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Menu {
-                        Picker("Show", selection: $showArchived) {
-                            Label("Active", systemImage: "tray").tag(false)
-                            Label("Archived", systemImage: "archivebox").tag(true)
+                        Picker("Show", selection: $filter) {
+                            ForEach(ChatFilter.allCases) { f in
+                                Label(f.label, systemImage: f.icon).tag(f)
+                            }
+                        }
+                        let tags = Array(Set(state.chats.flatMap { $0.tags ?? [] })).sorted()
+                        if !tags.isEmpty {
+                            Picker("Tag", selection: $tagFilter) {
+                                Label("Any tag", systemImage: "tag").tag(String?.none)
+                                ForEach(tags, id: \.self) { t in
+                                    Label(t, systemImage: "tag.fill").tag(String?.some(t))
+                                }
+                            }
+                        }
+                        Divider()
+                        Button { listModel.showProjects = true } label: {
+                            Label("Projects…", systemImage: "folder.badge.gearshape")
+                        }
+                        Button { Task { await state.sortByRecent() } } label: {
+                            Label("Sort by most recent", systemImage: "arrow.up.arrow.down")
+                        }
+                        Button { listModel.showStats = true } label: {
+                            Label("Usage stats", systemImage: "chart.bar")
                         }
                         if !state.projects.isEmpty {
                             // projects are folders, in the Telegram sense
@@ -143,7 +148,7 @@ struct ChatListView: View {
                             }
                         }
                     } label: {
-                        Image(systemName: (showArchived || project != nil)
+                        Image(systemName: (filter != .active || project != nil || tagFilter != nil)
                               ? "line.3.horizontal.decrease.circle.fill"
                               : "line.3.horizontal.decrease.circle")
                     }
@@ -157,6 +162,11 @@ struct ChatListView: View {
                     } label: { Image(systemName: "square.and.pencil") }
                     .keyboardShortcut("n", modifiers: .command)
                     .accessibilityLabel("New chat")
+                    .contextMenu {
+                        Button { Task { await state.startTemporaryChat() } } label: {
+                            Label("New temporary chat", systemImage: "flame")
+                        }
+                    }
                 }
             }
             .navigationDestination(item: $goToChat) { ChatView(sid: $0) }
@@ -178,6 +188,25 @@ struct ChatListView: View {
                 await state.refreshRunning()
                 Cache.prune(keeping: state.chats.map(\.id))
             }
+            .task {
+                // answering / waiting for you, kept current while the list is on screen
+                while !Task.isCancelled {
+                    await state.refreshRunningState()
+                    try? await Task.sleep(nanoseconds: 5_000_000_000)
+                }
+            }
+            .onAppear { listModel.refreshSeen() }
+            .modifier(ChatListHost(model: listModel))
+        }
+    }
+
+    private func passes(_ c: ChatSummary) -> Bool {
+        switch filter {
+        case .active: return c.archived != true
+        case .pinned: return c.pinned == true
+        case .archived: return c.archived == true
+        case .attention:
+            return state.status(of: c, seen: listModel.seen).needsAttention
         }
     }
 
@@ -219,7 +248,7 @@ struct ChatListView: View {
         HStack(spacing: 12) {
             ZStack {
                 Circle().fill(avatarColor(chat.id).gradient)
-                if state.runningChats.contains(chat.id) {
+                if state.runningChats.contains(chat.id) || state.chatExtras.waiting.contains(chat.id) {
                     ProgressView().controlSize(.mini).tint(.white)
                 } else {
                     Text(String(chat.displayTitle.prefix(1)).uppercased())
@@ -238,6 +267,7 @@ struct ChatListView: View {
                 Text(relative(chat.date) + (chat.n > 0 ? " · \(chat.n) messages" : " · empty"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                ChatStatusBadge(status: state.status(of: chat, seen: listModel.seen))
                 if let tags = chat.tags, !tags.isEmpty {
                     HStack(spacing: 4) {
                         ForEach(tags.prefix(3), id: \.self) { t in

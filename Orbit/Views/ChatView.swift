@@ -24,6 +24,8 @@ struct ChatView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var typing: Bool
     @ObservedObject private var links = FileLinks.shared
+    /// Per-message and chat-level actions, and the sheets they open (Views/Chat).
+    @StateObject private var actionsModel = ChatActionsModel()
 
     var body: some View {
         // The banner and composer are safe-area insets rather than VStack rows:
@@ -33,6 +35,7 @@ struct ChatView: View {
             .safeAreaInset(edge: .top, spacing: 0) {
                 VStack(spacing: 0) {
                     ConnectionBanner()
+                    ChatModeChips(sid: sid, model: actionsModel)
                     if finding { findBar }
                 }
             }
@@ -72,6 +75,7 @@ struct ChatView: View {
                         } label: {
                             Label("Compact history", systemImage: "arrow.down.right.and.arrow.up.left")
                         }
+                        ChatMenuItems(sid: sid, model: actionsModel)
                         Divider()
                         Button(role: .destructive) { confirmBin = true } label: {
                             Label("Move to bin", systemImage: "trash")
@@ -105,23 +109,9 @@ struct ChatView: View {
                 draft = text; typing = true; state.draftPrefill = nil
             }
             .onChange(of: draft) { _, text in Drafts.save(sid, text) }
-            .alert("Approve this?", isPresented: approvalBinding) {
-                Button("Allow", role: .destructive) {
-                    Task { await state.answer(approval: true) }
-                }
-                Button("Refuse", role: .cancel) {
-                    Task { await state.answer(approval: false) }
-                }
-            } message: {
-                if let p = state.pendingApproval {
-                    Text("\(p.name)\n\n\(p.reason)")
-                }
-            }
-    }
-
-    private var approvalBinding: Binding<Bool> {
-        Binding(get: { state.pendingApproval != nil },
-                set: { if !$0 { state.pendingApproval = nil } })
+            // questions and approvals are cards in the transcript (ChatPromptCards)
+            .modifier(ChatActionsHost(sid: sid, model: actionsModel))
+            .modifier(ToastOverlay())
     }
 
     private var currentModelName: String { state.currentModelName }
@@ -151,8 +141,9 @@ struct ChatView: View {
                         MessageBubble(message: m,
                                       isLast: i == state.messages.count - 1,
                                       onEdit: { msg in Task { await state.editAndResend(msg) } },
-                                      onRegenerate: { Task { await state.regenerate() } },
-                                      onQuote: { msg in quote(msg) })
+                                      onRegenerate: { actionsModel.confirmRegenerate = false },
+                                      onQuote: { msg in quote(msg) },
+                                      actions: actionsModel.actions(state))
                             .id(m.id)
                             .padding(.horizontal, flashed == i ? 8 : 0)
                             .padding(.vertical, flashed == i ? 6 : 0)
@@ -161,6 +152,7 @@ struct ChatView: View {
                             .id("row-\(i)")
                     }
                     if state.streaming { liveBubble.id("live").environment(\.fileLinkSid, nil) }
+                    ChatPromptCards().id("prompts")
                     if let e = state.lastError, !state.streaming { errorNote(e) }
                     Color.clear.frame(height: 8).id("bottom")
                 }
@@ -171,6 +163,13 @@ struct ChatView: View {
             .scrollDismissesKeyboard(.interactively)
             .onChange(of: state.messages.count) { _, _ in scroll(proxy) }
             .onChange(of: state.liveText) { _, _ in scroll(proxy) }
+            .onChange(of: state.chatExtras.question?.id) { _, _ in scroll(proxy) }
+            .onChange(of: state.chatExtras.approval?.id) { _, _ in scroll(proxy) }
+            .onChange(of: actionsModel.jumpRequest) { _, i in
+                guard let i else { return }
+                jumpTo = i
+                actionsModel.jumpRequest = nil
+            }
             .onChange(of: jumpTo) { _, i in
                 guard let i else { return }
                 withAnimation(reduceMotion ? nil : .default) {
@@ -180,6 +179,7 @@ struct ChatView: View {
                 jumpTo = nil
             }
             .onAppear { scroll(proxy, animated: false) }
+            .onDisappear { SeenChats.mark(sid, mtime: state.chats.first { $0.id == sid }?.mtime ?? 0) }
             .modifier(AnswerTextSize())
             // file names in answers are looked up in this chat
             .environment(\.fileLinkSid, sid)
@@ -187,6 +187,7 @@ struct ChatView: View {
                 // what you were typing here last time, unless something is being handed in
                 draft = Drafts.load(sid)
                 await state.open(sid)
+                SeenChats.mark(sid, mtime: state.chats.first { $0.id == sid }?.mtime ?? 0)
                 if let text = state.draftPrefill { draft = text; typing = true; state.draftPrefill = nil }
                 // a search hit: land on that message and flash it once the rows exist
                 guard let h = highlight, h < state.messages.count, flashed == nil else { return }

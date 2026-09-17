@@ -55,6 +55,8 @@ final class AppState: ObservableObject {
     @Published var liveStatus = ""
     @Published var liveModel = ""
     @Published var pendingApproval: (name: String, reason: String, id: String)?
+    /// Questions, approvals, plan mode, temporary chat, row status (AppState+Chat.swift).
+    @Published var chatExtras = ChatExtras()
 
     private(set) var server: OrbitServer?
     private var streamTask: Task<Void, Never>?
@@ -252,6 +254,7 @@ final class AppState: ObservableObject {
         streaming = false; liveSid = nil
         liveText = ""; liveThinking = ""; liveTools = []; liveStatus = ""
         pendingApproval = nil
+        chatExtras.question = nil; chatExtras.approval = nil
     }
 
     func open(_ id: String) async {
@@ -270,6 +273,7 @@ final class AppState: ObservableObject {
         do {
             let d = try await server.chat(id)
             openChat = d
+            chatExtras.planMode = d.plan_mode ?? false
             var fresh = d.messages
             // Mid-answer the Mac may not have written the question yet (it starts
             // the model server first). Keep the one we showed rather than losing it.
@@ -322,7 +326,7 @@ final class AppState: ObservableObject {
 
     // ------------------------------------------------------------ sending
 
-    func send(_ text: String) async {
+    func send(_ text: String, effort: String? = nil) async {
         guard let server, let sid = openChat?.sid,
               !(text.isEmpty && attachments.isEmpty) else { return }
         let going = attachments
@@ -337,7 +341,8 @@ final class AppState: ObservableObject {
             var dropped = false
             do {
                 for try await ev in await server.send(sid: sid, message: text,
-                                                      attachments: going.map(\.payload)) {
+                                                      attachments: going.map(\.payload),
+                                                      effort: effort) {
                     if Task.isCancelled { break }
                     // a chat you have since left keeps generating on the Mac;
                     // its tokens must not land in the one you are looking at
@@ -378,6 +383,7 @@ final class AppState: ObservableObject {
         pendingText = ""
         liveModel = models.first { $0.id == currentModel }?.display ?? ""
         pendingApproval = nil
+        chatExtras.question = nil; chatExtras.approval = nil; chatExtras.roundLimit = nil
     }
 
     /// Tokens arrive faster than a phone can re-render Markdown. Batch them and
@@ -414,6 +420,11 @@ final class AppState: ObservableObject {
         case .approval(let n, let r, let id):
             pendingApproval = (n, r, id ?? "")
         case .notice(let n):   liveTools.append("↪ " + n)
+        case .question(let q): chatExtras.question = q
+        case .approvalPrompt(let a):
+            chatExtras.approval = a
+            pendingApproval = (a.name, a.reason, a.id)
+        case .roundLimit(let why): chatExtras.roundLimit = why
         case .error(let e):    lastError = e
         case .end(_, let title):
             if let title, var c = openChat {
@@ -466,10 +477,11 @@ final class AppState: ObservableObject {
         let answered = liveText
         streaming = false
         liveText = ""; liveThinking = ""; liveTools = []; liveStatus = ""
+        chatExtras.question = nil; chatExtras.approval = nil; pendingApproval = nil
         if !answered.isEmpty {
             notifyIfBackgrounded(title: openChat?.title ?? "Orbit", body: answered, sid: sid)
         }
-        Task { await loadChats(); await loadQueue() }
+        Task { await loadChats(); await loadQueue(); await reloadSaved(sid) }
     }
 
     /// Reconnect to an answer already running on the Mac.
@@ -491,6 +503,7 @@ final class AppState: ObservableObject {
                     messages = d.messages
                 }
                 step = s.step ?? step
+                await pickUpPrompts(sid)            // a question or approval raised elsewhere
                 liveText = s.content
                 liveThinking = s.thinking
                 if !s.content.isEmpty { liveStatus = "" }
@@ -729,6 +742,7 @@ extension AppState {
     /// Compiled out of release builds.
     func runDebugScript() async {
         let env = ProcessInfo.processInfo.environment
+        await runChatSelfTest()          // ORBIT_CHAT_SELFTEST (ChatSelfTest.swift)
         guard let want = env["ORBIT_OPEN_CHAT"] else { return }
         let sid = want == "first" ? chats.first?.id : want
         guard let sid, !sid.isEmpty else { return }
