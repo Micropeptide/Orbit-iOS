@@ -5,11 +5,15 @@ import QuickLook
 /// web page's search does. The list is read when a search starts (and again
 /// once it is a couple of minutes old) and filtered here — the Mac has no
 /// file-name search of its own.
+///
+/// The QuickLook preview lives on the list around it (`preview`), not on this
+/// section: the section changes as the list refreshes, and a preview attached to
+/// it closed when it did.
 struct FileSearchSection: View {
     @EnvironmentObject var state: AppState
     let query: String
+    @Binding var preview: URL?
     @StateObject private var model = FileSearchModel()
-    @State private var preview: URL?
     @State private var failed: String?
 
     private var term: String { query.trimmingCharacters(in: .whitespaces).lowercased() }
@@ -22,7 +26,7 @@ struct FileSearchSection: View {
     }
 
     var body: some View {
-        if term.count >= 2 && model.needsLoad {
+        if term.count >= 2 && model.needsLoad && matches.isEmpty {
             // the row exists only while the list is being read, so its task is what reads it
             HStack(spacing: 8) {
                 ProgressView().controlSize(.mini)
@@ -46,7 +50,8 @@ struct FileSearchSection: View {
                 }
                 if let failed { Text(failed).font(.caption).foregroundStyle(.orange) }
             }
-            .quickLookPreview($preview)
+            // an old list is read again quietly, the matches staying on screen meanwhile
+            .task(id: term) { if model.needsLoad { await model.load(state.server) } }
         }
     }
 

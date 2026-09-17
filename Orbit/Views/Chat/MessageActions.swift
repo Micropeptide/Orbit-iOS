@@ -75,8 +75,11 @@ struct MessageActions {
     func userItems(_ m: Message) -> some View {
         Button { retryFrom(m) } label: {
             Label("Retry from here", systemImage: "arrow.clockwise")
+            if m.hasUnsendableAttachments {
+                Text("Only its words could go again, not its attachments")
+            }
         }
-        .disabled(busy)
+        .disabled(busy || m.hasUnsendableAttachments)
         Button { fork(m) } label: {
             Label("Fork from here", systemImage: "arrow.triangle.branch")
         }

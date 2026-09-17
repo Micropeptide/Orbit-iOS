@@ -45,6 +45,9 @@ struct ChatView: View {
     @AppStorage("orbit.todosHidden") private var todosHidden = false
     @AppStorage("theme") private var theme = "system"
     @AppStorage("orbit.hideTools") private var hideTools = false
+    /// `/clear`: the rows before this many messages are hidden until the chat is opened
+    /// again. Only the view: the messages, the chat on the Mac and the cache keep them.
+    @State private var cleared: (sid: String, count: Int)?
 
     var body: some View {
         // The banner and composer are safe-area insets rather than VStack rows:
@@ -148,7 +151,11 @@ struct ChatView: View {
 
     private var currentModelName: String { state.currentModelName }
 
-    private var transcriptRows: [TranscriptRow] { TranscriptRow.build(state.messages) }
+    private var transcriptRows: [TranscriptRow] {
+        let rows = TranscriptRow.build(state.messages)
+        guard let c = cleared, c.sid == sid, c.count <= state.messages.count else { return rows }
+        return rows.filter { $0.index >= c.count }
+    }
 
     // ------------------------------------------------------------ transcript
 
@@ -316,7 +323,9 @@ struct ChatView: View {
     }
     // what you send always brings you down; what arrives only follows you if you are
     // already at the bottom -- reading further up, you stay where you are
-    .onChange(of: state.messages.count) { _, _ in
+    .onChange(of: state.messages.count) { _, n in
+        // fewer messages than were cleared (a rewind, a reload): nothing older to hide
+        if let c = cleared, n < c.count { cleared = nil }
         if state.messages.last?.isUser == true { following = true; scroll(proxy) } else { follow(proxy) }
     }
     .onChange(of: state.liveText) { _, _ in follow(proxy, animated: false) }
@@ -439,7 +448,10 @@ struct ChatView: View {
         case "/hidetools":
             hideTools.toggle()
             state.toast(hideTools ? "Finished tool rows hidden" : "Tool rows shown")
-        case "/clear":       state.messages = []     // the screen only; the chat is untouched
+        case "/clear":
+            // the screen only, until the chat is opened again: emptying `messages` was
+            // undone by the next reload and could be cached as the whole chat
+            cleared = (sid, state.messages.count)
         case "/help":        actionsModel.showHelp = true
         default: return false
         }

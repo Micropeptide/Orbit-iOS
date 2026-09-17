@@ -81,7 +81,7 @@ final class SlashController: ObservableObject {
         ("/memory", "memory and instructions"),
         ("/agent", "choose this chat's agent"), ("/instructions", "this chat's own instructions"),
         ("/remember", "save a note to memory: /remember <text>"),
-        ("/scheduled", "messages and tasks for later"), ("/files", "files Orbit made or you gave it"),
+        ("/scheduled", "messages and tasks for later"), ("/files", "files named in this chat"),
         ("/rename", "rename this chat: /rename <title>"),
         ("/later", "send later: /later 21:30 <message>, /later tomorrow 9am …, /later daily 8:00 …"),
         ("/tasks", "everything running in the background — answers, queued messages, shell jobs"),
@@ -171,7 +171,10 @@ final class SlashController: ObservableObject {
             guard let sid else { note = "Open a chat first"; return "" }
             sheet = .chat(sid)
         case "/scheduled": state.tab = "scheduled"
-        case "/files":     state.tab = "files"
+        case "/files":
+            // in a chat, the chat's own list of the files it names (ChatView); elsewhere the Files tab
+            if sid != nil { return nil }
+            state.tab = "files"
         case "/remember":
             guard !rest.isEmpty else { return "/remember " }
             Task { await remember(rest, state: state) }
@@ -258,7 +261,13 @@ final class SlashController: ObservableObject {
             _ = onCommand?(item.command)
         case .library:
             if Self.takesWords.contains(item.command) { draft = item.command + " "; return }
-            draft = intercept(item.command, state: state) ?? ""
+            if let replaced = intercept(item.command, state: state) {
+                draft = replaced
+            } else {
+                // one the chat itself answers, such as /files
+                draft = ""
+                _ = onCommand?(item.command)
+            }
         case .prompt:
             let p = SlashCatalog.shared.prompts.first { "/" + $0.name == item.command }
             let body = p?.text ?? ""

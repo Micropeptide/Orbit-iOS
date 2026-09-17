@@ -128,7 +128,7 @@ struct Composer: View {
                 }
                 .accessibilityLabel("Attach")
 
-                TextField(queues ? "Queue a message" : "Message", text: $draft, axis: .vertical)
+                TextField(queues ? "Queue a message" : "Message", text: typedDraft, axis: .vertical)
                     .lineLimit(1...6)
                     .font(mode == .shell ? .body.monospaced() : .body)
                     .focused(typing)
@@ -213,7 +213,6 @@ struct Composer: View {
                 Task { for u in urls { await state.attach(fileAt: u) } }
             }
         }
-        .onChange(of: draft) { old, new in foldPaste(old: old, new: new) }
         .task(id: sid) {
             if let sid { pastes = Pastes.load(sid) }
         }
@@ -266,28 +265,43 @@ struct Composer: View {
         let raw = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         let text = Pastes.expand(raw, pastes)
         guard !text.isEmpty || !state.attachments.isEmpty else { return }
-        if !text.isEmpty { PromptHistory.push(text) }
-        Haptics.tap()
-
-        if queues && !text.hasPrefix("/") {
-            if now && state.streaming { steer(text); return }
-            let kept = draft
-            clearBox()
-            Task { if !(await state.enqueue(text)) { draft = kept } }
-            return
-        }
         let sending = mode
-        clearBox()
+        // `!` and `#` lines are actions, not messages: they never wait in the queue
         if sending == .shell {
             let cmd = String(text.dropFirst()).trimmingCharacters(in: .whitespaces)
-            if !cmd.isEmpty { Task { await state.runBang(cmd) } }
+            guard !cmd.isEmpty else { return }
+            // the Mac holds the chat while it answers and refuses a command (409): say
+            // so here and keep the box, rather than queueing it as a message
+            if state.streaming {
+                slash.note = "That chat is answering — run it after"
+                return
+            }
+            PromptHistory.push(text)
+            Haptics.tap()
+            clearBox()
+            Task { await state.runBang(cmd) }
             return
         }
         if sending == .memory {
+            PromptHistory.push(text)
+            Haptics.tap()
+            clearBox()
             Task { await state.rememberLine(String(text.dropFirst(2))) }
             return
         }
-        if text.hasPrefix("/") {
+        if !text.isEmpty { PromptHistory.push(text) }
+        Haptics.tap()
+
+        let command = Self.isCommand(text)
+        let kept = draft, keptPastes = pastes, keptSid = sid
+        if queues && !command {
+            if now && state.streaming { steer(text); return }
+            clearBox()
+            Task { if !(await state.enqueue(text)) { restore(kept, keptPastes, sid: keptSid) } }
+            return
+        }
+        clearBox()
+        if command {
             if let replaced = slash.intercept(text, state: state) {
                 draft = replaced      // a saved prompt expands in place; a Library command ran
                 return
@@ -296,7 +310,7 @@ struct Composer: View {
             // Claude Code and Codex have commands of their own; Orbit's chats do not
             if !SlashCatalog.isClaudeChat(state) {
                 slash.note = slash.unknownCommand(text, builtins: Self.commands)
-                draft = text
+                restore(kept, keptPastes, sid: keptSid)
                 return
             }
         }
@@ -312,6 +326,22 @@ struct Composer: View {
         if !state.attachments.isEmpty { state.toast("The note goes without the attachments — send those after") }
         clearBox()
         Task { await state.steer(text) }
+    }
+
+    /// A `/command` is a slash and a word at the very start; "/Users/me/data.csv
+    /// summarize" is a path, and goes out as a message.
+    static func isCommand(_ text: String) -> Bool {
+        guard text.range(of: #"^/[A-Za-z][\w-]*(\s|$)"#, options: .regularExpression) != nil else { return false }
+        let head = text.split(whereSeparator: \.isWhitespace).first ?? ""
+        return !head.dropFirst().contains("/")
+    }
+
+    /// Put back a draft that could not be queued or scheduled, with the long pastes its tokens stand for.
+    private func restore(_ kept: String, _ keptPastes: [Int: String], sid keptSid: String?) {
+        guard keptSid == sid else { return }
+        pastes = keptPastes
+        if let keptSid { Pastes.save(keptSid, keptPastes) }
+        draft = kept
     }
 
     private func clearBox() {
@@ -340,16 +370,28 @@ struct Composer: View {
     private func schedule(at date: Date, repeat rep: Repeat) {
         let text = Pastes.expand(draft.trimmingCharacters(in: .whitespacesAndNewlines), pastes)
         guard !(text.isEmpty && state.attachments.isEmpty) else { return }
-        let kept = draft
+        let kept = draft, keptPastes = pastes, keptSid = sid
         clearBox()
         Haptics.success()
-        Task { if !(await state.sendLater(text, at: date, repeat: rep)) { draft = kept } }
+        Task { if !(await state.sendLater(text, at: date, repeat: rep)) { restore(kept, keptPastes, sid: keptSid) } }
     }
 
     // ------------------------------------------------------------ long pastes
 
     private var pasteTokens: [Int] {
         pastes.isEmpty ? [] : Pastes.tokens(in: draft).filter { pastes[$0] != nil }
+    }
+
+    /// The box's text as the text field sees it. Only your own typing and pasting
+    /// come through this setter; the app filling the box (a saved draft, a quote,
+    /// edit and resend, an earlier message, "show the paste") writes `draft`
+    /// directly, so only a real paste is folded away.
+    private var typedDraft: Binding<String> {
+        Binding(get: { draft }, set: { new in
+            let old = draft
+            draft = new
+            foldPaste(old: old, new: new)
+        })
     }
 
     /// A long block arriving at once is a paste: it folds into a token, so the box
