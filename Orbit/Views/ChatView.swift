@@ -11,6 +11,10 @@ struct ChatView: View {
     /// Whether the newest message is on screen, and whether more arrived while it was not.
     @State private var atBottom = true
     @State private var newBelow = false
+    /// Whether new text should keep you at the newest message. Only your own finger turns
+    /// it off (dragging back up to read); rows changing height never do -- they used to
+    /// leave the view parked past the end of a finished answer, which looked blank.
+    @State private var following = true
     @EnvironmentObject var state: AppState
     @State private var draft = ""
     @State private var showModels = false
@@ -205,7 +209,7 @@ struct ChatView: View {
                     if let e = state.lastError, !state.streaming { errorNote(e) }
                     // seen = you are at the newest message; new text follows you only then
                     Color.clear.frame(height: 8).id("bottom")
-                        .onAppear { atBottom = true; newBelow = false }
+                        .onAppear { atBottom = true; newBelow = false; following = true }
                         .onDisappear { atBottom = false }
                 }
                 .padding(.horizontal, 16)
@@ -213,32 +217,7 @@ struct ChatView: View {
             }
             .defaultScrollAnchor(.bottom)          // open at the newest message
             .scrollDismissesKeyboard(.interactively)
-            // what you send always brings you down; what arrives only follows you if you are
-            // already at the bottom -- reading further up, you stay where you are
-            .onChange(of: state.messages.count) { _, _ in
-                if state.messages.last?.isUser == true { scroll(proxy) } else { follow(proxy) }
-            }
-            .onChange(of: state.liveText) { _, _ in follow(proxy, animated: false) }
-            .onChange(of: state.liveRuns.count + state.liveSteps.count) { _, _ in follow(proxy) }
-            .onChange(of: state.chatExtras.question?.id) { _, _ in follow(proxy) }
-            .onChange(of: state.chatExtras.approval?.id) { _, _ in follow(proxy) }
-            .overlay(alignment: .bottom) {
-                if !atBottom && (newBelow || state.streaming) {
-                    Button {
-                        scroll(proxy); newBelow = false
-                    } label: {
-                        Label(newBelow ? "New messages" : "Latest", systemImage: "arrow.down")
-                            .font(.footnote.weight(.semibold))
-                            .padding(.horizontal, 12).padding(.vertical, 7)
-                            .background(.regularMaterial, in: Capsule())
-                            .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
-                    }
-                    .buttonStyle(.plain)
-                    .padding(.bottom, 10)
-                    .transition(.opacity)
-                    .accessibilityHint("Scrolls to the newest message")
-                }
-            }
+            .apply { followingNewest($0, proxy: proxy) }
             .onChange(of: actionsModel.jumpRequest) { _, i in
                 guard let i else { return }
                 jumpTo = i
@@ -291,10 +270,62 @@ struct ChatView: View {
         .background(.orange.opacity(0.10), in: .rect(cornerRadius: 10))
     }
 
+    /// How the transcript keeps up with new text: follows while you are at the newest message,
+    /// stays put while you read back, and offers a button to come back down. (Its own function:
+    /// in the long modifier chain above, the compiler gave up type-checking.)
+    private func followingNewest<V: View>(_ content: V, proxy: ScrollViewProxy) -> some View {
+        content
+    // pulling the list down is you reading back: stop following until you come back down
+    .simultaneousGesture(DragGesture(minimumDistance: 12).onChanged { v in
+        if v.translation.height > 16 { following = false }
+    })
+    // the answer's live rows turn into saved rows of another height when it ends, and a
+    // reload replaces them again: settle on the newest message once they have laid out
+    .onChange(of: state.streaming) { _, on in if !on { settle(proxy) } }
+    .onChange(of: state.messages.last?.id) { _, _ in settle(proxy) }
+    .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidShowNotification)) { _ in
+        settle(proxy)
+    }
+    // what you send always brings you down; what arrives only follows you if you are
+    // already at the bottom -- reading further up, you stay where you are
+    .onChange(of: state.messages.count) { _, _ in
+        if state.messages.last?.isUser == true { following = true; scroll(proxy) } else { follow(proxy) }
+    }
+    .onChange(of: state.liveText) { _, _ in follow(proxy, animated: false) }
+    .onChange(of: state.liveRuns.count + state.liveSteps.count) { _, _ in follow(proxy) }
+    .onChange(of: state.chatExtras.question?.id) { _, _ in follow(proxy) }
+    .onChange(of: state.chatExtras.approval?.id) { _, _ in follow(proxy) }
+    .overlay(alignment: .bottom) {
+        if !atBottom && (newBelow || state.streaming) {
+            Button {
+                following = true; scroll(proxy); newBelow = false
+            } label: {
+                Label(newBelow ? "New messages" : "Latest", systemImage: "arrow.down")
+                    .font(.footnote.weight(.semibold))
+                    .padding(.horizontal, 12).padding(.vertical, 7)
+                    .background(.regularMaterial, in: Capsule())
+                    .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
+            }
+            .buttonStyle(.plain)
+            .padding(.bottom, 10)
+            .transition(.opacity)
+            .accessibilityHint("Scrolls to the newest message")
+        }
+    }
+    }
+
     /// Keeps up with a growing answer only while you are at the bottom; otherwise marks
     /// that something new arrived below.
     private func follow(_ proxy: ScrollViewProxy, animated: Bool = true) {
-        if atBottom { scroll(proxy, animated: animated) } else { newBelow = true }
+        if following { scroll(proxy, animated: animated) } else { newBelow = true }
+    }
+
+    /// Back to the newest message after the rows have been measured -- twice, because a
+    /// lazy list measures rows it has not drawn only as they come on screen.
+    private func settle(_ proxy: ScrollViewProxy) {
+        guard following else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { scroll(proxy, animated: false) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { if following { scroll(proxy, animated: false) } }
     }
 
     private func scroll(_ proxy: ScrollViewProxy, animated: Bool = true) {
@@ -505,4 +536,9 @@ struct TranscriptPage: View {
         .background(Color.white)
         .environment(\.colorScheme, .light)
     }
+}
+
+extension View {
+    /// Hands the view to a function mid-chain, so a long chain can be split up.
+    func apply<V: View>(@ViewBuilder _ transform: (Self) -> V) -> V { transform(self) }
 }

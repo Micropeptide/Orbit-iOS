@@ -85,14 +85,6 @@ extension AppState {
 
     // ------------------------------------------------------------ the message box
 
-    /// Add text where you are typing, after what is already there.
-    func insertInDraft(_ text: String) {
-        guard let sid = openChat?.sid else { return }
-        let current = Drafts.load(sid)
-        let pad = current.isEmpty || current.hasSuffix(" ") || current.hasSuffix("\n") ? "" : " "
-        draftPrefill = current + pad + text
-    }
-
     /// Quote some words into your reply.
     func quoteInDraft(_ text: String) {
         guard let sid = openChat?.sid else { return }
@@ -100,30 +92,6 @@ extension AppState {
             .map { "> " + $0 }.joined(separator: "\n") + "\n\n"
         let current = Drafts.load(sid)
         draftPrefill = (current.isEmpty ? "" : current.hasSuffix("\n") ? current + "\n" : current + "\n\n") + quoted
-    }
-
-    /// A file the Mac already has, attached to your next message. A picture goes
-    /// as the image itself so the model can see it.
-    func attachExisting(_ f: ResolvedPath) async {
-        guard let path = f.path else { return }
-        if let host = f.host, !host.isEmpty {
-            toast("That file is on \(host) — its path goes in the message instead")
-            insertInDraft(path)
-            return
-        }
-        if f.category == "image", let url = f.url, (f.size ?? 0) < 15_000_000,
-           let server, let abs = await server.absolute(url),
-           let (data, _) = try? await URLSession.shared.data(from: abs), let img = UIImage(data: data) {
-            let mime = (f.displayName as NSString).pathExtension.lowercased() == "png" ? "image/png" : "image/jpeg"
-            let dataURL = "data:\(mime);base64," + data.base64EncodedString()
-            attachments.append(Attachment(name: f.displayName, kind: "image",
-                                          payload: ["kind": "image", "name": f.displayName, "data_url": dataURL],
-                                          thumbnail: img.downscaled(maxSide: 120)))
-        } else {
-            attachments.append(Attachment(name: f.displayName, kind: "file",
-                                          payload: ["kind": "file", "name": f.displayName, "path": path]))
-        }
-        toast("Attached \(f.displayName)")
     }
 
     // ------------------------------------------------------------ any message
