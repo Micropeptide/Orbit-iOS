@@ -5,7 +5,7 @@ struct ModelPickerView: View {
     @Environment(\.dismiss) private var dismiss
 
     private var grouped: [(String, [ModelInfo])] {
-        Dictionary(grouping: state.models) { $0.provider_label ?? $0.provider }
+        Dictionary(grouping: state.models) { $0.group }
             .sorted { $0.key < $1.key }
     }
 

@@ -23,6 +23,7 @@ struct ChatView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var typing: Bool
+    @ObservedObject private var links = FileLinks.shared
 
     var body: some View {
         // The banner and composer are safe-area insets rather than VStack rows:
@@ -97,6 +98,7 @@ struct ChatView: View {
                 Text("It stays in the bin on your Mac for the retention period.")
             }
             .sheet(isPresented: $showModels) { ModelPickerView() }
+            .sheet(item: $links.presenting) { FilePreviewSheet(target: $0) }
             .sheet(item: $pdfURL) { ActivityView(items: [$0]).ignoresSafeArea() }
             .onChange(of: state.draftPrefill) { _, text in
                 guard let text else { return }
@@ -158,7 +160,7 @@ struct ChatView: View {
                                         in: .rect(cornerRadius: 10))
                             .id("row-\(i)")
                     }
-                    if state.streaming { liveBubble.id("live") }
+                    if state.streaming { liveBubble.id("live").environment(\.fileLinkSid, nil) }
                     if let e = state.lastError, !state.streaming { errorNote(e) }
                     Color.clear.frame(height: 8).id("bottom")
                 }
@@ -179,6 +181,8 @@ struct ChatView: View {
             }
             .onAppear { scroll(proxy, animated: false) }
             .modifier(AnswerTextSize())
+            // file names in answers are looked up in this chat
+            .environment(\.fileLinkSid, sid)
             .task(id: sid) {
                 // what you were typing here last time, unless something is being handed in
                 draft = Drafts.load(sid)
@@ -316,14 +320,7 @@ struct ChatView: View {
                 .font(.caption2.smallCaps())
                 .foregroundStyle(.secondary)
 
-            ForEach(state.liveTools, id: \.self) { t in
-                let auto = t.hasPrefix("✓ auto-approved")
-                Text(t)
-                    .font(.caption.monospaced())
-                    .foregroundStyle(auto ? .green : .orange)
-                    .padding(.vertical, 5).padding(.horizontal, 9)
-                    .background((auto ? Color.green : Color.orange).opacity(0.10), in: .rect(cornerRadius: 7))
-            }
+            ForEach(state.liveTools, id: \.self) { ToolLine(text: $0) }
 
             if !state.liveStatus.isEmpty && state.liveText.isEmpty {
                 HStack(spacing: 7) {

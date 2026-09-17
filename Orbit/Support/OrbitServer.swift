@@ -461,7 +461,25 @@ actor OrbitServer {
         // the chat was already answering: the Mac queued this message, and starts it
         // by itself once the answer running now is done
         case "queued_message":
+            let d = p as? [String: Any]
+            if str("why") == "scheduled" {
+                let item = d?["item"] as? [String: Any]
+                let at = (item?["at"] as? Double) ?? (item?["at"] as? String).flatMap(Double.init)
+                let when = at.map { When.describe(Date(timeIntervalSince1970: $0)) } ?? "later"
+                let rep = Repeat(server: item?["repeat"] as? String)
+                return .content("Scheduled for \(when)" + (rep == .once ? "." : " · \(rep.label.lowercased())."))
+            }
             return .content("Queued — it starts by itself when the answer running now is done.")
+        // the chosen model failed and another took over
+        case "fallback":
+            let d = p as? [String: Any]
+            let to = [str("to_label"), str("to")].first { !$0.isEmpty } ?? "another model"
+            let after = (d?["after"] as? Int) ?? (d?["after"] as? String).flatMap(Int.init)
+            var line = "switched to \(to)"
+            if let after { line += " after \(after) failure\(after == 1 ? "" : "s")" }
+            let why = str("why")
+            if !why.isEmpty { line += " (\(why.prefix(80)))" }
+            return .notice(line)
         case "interjected":    return .content("Sent in — it reads this at its next step.")
         case "retry":          return .status("model error — retrying")
         case "subtask":
@@ -479,5 +497,129 @@ actor OrbitServer {
     /// Answer an approval prompt raised mid-answer.
     func approve(_ id: String, allow: Bool) async throws {
         try await post("/api/approve", ["id": id, "allow": allow])
+    }
+
+    // ------------------------------------------------------------ queue and send later
+
+    /// One chat's waiting messages. Every op answers with the queue as it now is.
+    @discardableResult
+    func queue(sid: String, op: String, _ extra: [String: Any] = [:]) async throws -> QueueState {
+        struct R: Codable { var ok: Bool?; var queue: QueueState?; var error: String? }
+        var body = extra
+        body["sid"] = sid
+        body["op"] = op
+        let data = try await post("/api/queue", body)
+        let r = try? JSONDecoder().decode(R.self, from: data)
+        if let e = r?.error { throw Failure.server(400, e) }
+        return r?.queue ?? .empty
+    }
+
+    /// Put a message in a chat's queue to go out at `at`, optionally repeating.
+    @discardableResult
+    func sendLater(sid: String, text: String, attachments: [[String: String]] = [],
+                   at: Date, repeat rep: Repeat) async throws -> QueueState {
+        try await queue(sid: sid, op: "add", ["text": text, "attachments": attachments,
+                                              "at": at.timeIntervalSince1970, "repeat": rep.server])
+    }
+
+    /// Change a waiting message. `update` does it in one go on a Mac that has
+    /// it; an older Mac gets `schedule` and `edit`, which cannot change the model.
+    func updateQueued(sid: String, id: String, text: String?, at: Date??,
+                      repeat rep: Repeat?, model: String?) async throws {
+        var body: [String: Any] = ["id": id]
+        if let text { body["text"] = text }
+        if let at { body["at"] = at.map { $0.timeIntervalSince1970 } ?? NSNull() }
+        if let rep { body["repeat"] = rep.server }
+        if let model { body["model"] = model }
+        do {
+            try await queue(sid: sid, op: "update", body)
+            return
+        } catch Failure.server(let code, let msg) where code == 400 && msg.contains("unknown op") {
+            // fall through to the older pair
+        }
+        if let text { try await queue(sid: sid, op: "edit", ["id": id, "text": text]) }
+        if at != nil || rep != nil {
+            var b: [String: Any] = ["id": id]
+            if let at { b["at"] = at.map { $0.timeIntervalSince1970 } ?? NSNull() }
+            if let rep { b["repeat"] = rep.server }
+            try await queue(sid: sid, op: "schedule", b)
+        }
+    }
+
+    // ------------------------------------------------------------ scheduled
+
+    /// Everything that happens later: messages waiting for their time in any
+    /// chat, and the Mac's scheduled tasks. Falls back to the two older
+    /// endpoints on a Mac that predates `/api/scheduled`.
+    func scheduled() async throws -> (messages: [ScheduledMessage], tasks: [ScheduledTask]) {
+        struct Both: Codable { var messages: [ScheduledMessage]?; var tasks: [ScheduledTask]? }
+        if let data = try? await post("/api/scheduled", [:]),
+           let r = try? JSONDecoder().decode(Both.self, from: data),
+           let m = r.messages, let t = r.tasks {
+            return (m, t)
+        }
+        struct Sends: Codable { var items: [ScheduledMessage]? }
+        struct Jobs: Codable { var jobs: [ScheduledTask]? }
+        let sendsData = try await post("/api/scheduled_sends", [:])
+        let sends = (try? JSONDecoder().decode(Sends.self, from: sendsData))?.items ?? []
+        let jobs = (try? await get("/api/schedule", as: Jobs.self))?.jobs ?? []
+        return (sends, jobs)
+    }
+
+    /// Create or change a task. A partial `job` is merged into the saved one.
+    func saveTask(_ job: [String: Any]) async throws {
+        struct R: Codable { var error: String? }
+        let data = try await post("/api/schedule/save", ["job": job])
+        if let e = (try? JSONDecoder().decode(R.self, from: data))?.error { throw Failure.server(400, e) }
+    }
+
+    func runTask(_ id: String) async throws {
+        try await post("/api/schedule/run", ["id": id])
+    }
+
+    func deleteTask(_ id: String) async throws {
+        try await post("/api/schedule/delete", ["id": id])
+    }
+
+    // ------------------------------------------------------------ file links
+
+    /// Which of these names in an answer are real files where the chat works.
+    func resolvePaths(sid: String, _ names: [String]) async throws -> [String: ResolvedPath] {
+        struct R: Codable { var items: [String: ResolvedPath]? }
+        let data = try await post("/api/paths/resolve", ["sid": sid, "paths": names])
+        return (try? JSONDecoder().decode(R.self, from: data))?.items ?? [:]
+    }
+
+    /// `preview` gives a page-ready link to a file; `render` turns a document,
+    /// spreadsheet or archive into an image or page first.
+    func fileAction(sid: String, path: String, action: String) async throws -> (url: String, kind: String?) {
+        struct R: Codable { var ok: Bool?; var url: String?; var kind: String?; var error: String? }
+        var req = try request("/api/file/action", method: "POST",
+                              body: ["sid": sid, "path": path, "action": action])
+        req.timeoutInterval = 120          // rendering a document, or fetching over ssh, takes a while
+        let data = try await run(req)
+        let r = try JSONDecoder().decode(R.self, from: data)
+        guard r.ok == true, let url = r.url else {
+            throw Failure.server(400, r.error ?? "the Mac could not show this file")
+        }
+        return (url, r.kind)
+    }
+
+    /// A link the Mac handed out, made absolute. `/fs/` links carry their own permission.
+    func absolute(_ path: String) -> URL? {
+        guard let base = pairing.base else { return nil }
+        return URL(string: path, relativeTo: base)?.absoluteURL
+    }
+
+    /// Bytes behind a preview link, saved under the file's own name for sharing.
+    func downloadPreview(_ path: String, name: String) async throws -> URL {
+        guard let url = absolute(path) else { throw Failure.notPaired }
+        let data = try await run(URLRequest(url: url))
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("orbit-share-\(UUID().uuidString.prefix(8))", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let out = dir.appendingPathComponent(name.isEmpty ? url.lastPathComponent : name)
+        try data.write(to: out, options: .atomic)
+        return out
     }
 }

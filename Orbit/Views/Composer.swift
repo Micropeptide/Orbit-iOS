@@ -28,6 +28,7 @@ struct Composer: View {
     @State private var showCamera = false
     @State private var showFiles = false
     @State private var picked: [PhotosPickerItem] = []
+    @State private var showLater = false
 
     private var canSend: Bool {
         !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -36,6 +37,8 @@ struct Composer: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            if !state.queue.items.isEmpty { QueueStrip() }
+            HStack(spacing: 8) {
             // Which model answers is the single fact you most want in view, so it
             // lives here rather than in a toolbar that folds it away when cramped.
             Button(action: onPickModel) {
@@ -50,8 +53,22 @@ struct Composer: View {
                 .background(.quaternary.opacity(0.35), in: .capsule)
             }
             .buttonStyle(.plain)
-            .padding(.top, 6)
             .accessibilityLabel("Model: \(modelName). Tap to change.")
+            if canSend && !state.streaming {
+                Button { showLater = true } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "clock").font(.caption2)
+                        Text("Send later").font(.caption.weight(.medium))
+                    }
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 10).padding(.vertical, 4)
+                    .background(.quaternary.opacity(0.35), in: .capsule)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Send later")
+            }
+            }
+            .padding(.top, 6)
             if !state.attachments.isEmpty || state.uploading { attachmentStrip }
             if !commandHints.isEmpty { commandStrip }
             HStack(alignment: .bottom, spacing: 8) {
@@ -119,6 +136,19 @@ struct Composer: View {
                     .disabled(!canSend)
                     .keyboardShortcut(.return, modifiers: .command)
                     .accessibilityLabel("Send")
+                    // hold to send it later instead
+                    .contextMenu {
+                        if canSend {
+                            ForEach(SendLaterSheet.presets(), id: \.label) { p in
+                                Button { schedule(at: p.date, repeat: .once) } label: {
+                                    Label("Send \(p.label)", systemImage: "clock")
+                                }
+                            }
+                            Button { showLater = true } label: {
+                                Label("Pick a time…", systemImage: "calendar.badge.clock")
+                            }
+                        }
+                    }
                 }
             }
             .padding(.horizontal, 12)
@@ -126,6 +156,10 @@ struct Composer: View {
             .padding(.bottom, 8)
         }
         .background(.bar)
+        .sheet(isPresented: $showLater) {
+            SendLaterSheet { date, rep in schedule(at: date, repeat: rep) }
+                .presentationDetents([.medium, .large])
+        }
         // Three real pickers. Each is a system sheet, presented from a bool it
         // owns, so nothing is hidden under anything else.
         .confirmationDialog("Attach", isPresented: $showAttachMenu, titleVisibility: .hidden) {
@@ -158,6 +192,16 @@ struct Composer: View {
                 Task { for u in urls { await state.attach(fileAt: u) } }
             }
         }
+    }
+
+    /// The draft goes into the chat's queue for later, and the box clears.
+    private func schedule(at date: Date, repeat rep: Repeat) {
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !(text.isEmpty && state.attachments.isEmpty) else { return }
+        let kept = draft
+        draft = ""
+        Haptics.success()
+        Task { if !(await state.sendLater(text, at: date, repeat: rep)) { draft = kept } }
     }
 
     /// Type "/" and the commands offer themselves.
