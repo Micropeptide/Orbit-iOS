@@ -6,6 +6,8 @@ struct MessageBubble: View {
     var onEdit: ((Message) -> Void)? = nil
     var onRegenerate: (() -> Void)? = nil
     var onQuote: ((Message) -> Void)? = nil
+    /// Fork, retry deeper, continue, check DOIs, undo file changes (Views/Chat).
+    var actions: MessageActions? = nil
     @State private var shareImage: ShareImage?
 
     /// Uploaded images come back as data: URLs, which UIImage cannot read directly.
@@ -43,6 +45,7 @@ struct MessageBubble: View {
                                 Label("Edit and resend", systemImage: "pencil.line")
                             }
                         }
+                        if let actions { actions.userItems(message) }
                     }
             }
             if message.note == true {
@@ -62,6 +65,7 @@ struct MessageBubble: View {
                 if let thinking = message.thinking, !thinking.isEmpty {
                     ThinkingBlock(text: thinking)
                 }
+                AnswerFooter(message: message, actions: actions)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .contextMenu {
@@ -82,6 +86,7 @@ struct MessageBubble: View {
                         Label("Ask again", systemImage: "arrow.clockwise")
                     }
                 }
+                if let actions { actions.answerItems(message, isLast: isLast) }
             }
         }
         }
