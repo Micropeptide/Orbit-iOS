@@ -151,7 +151,7 @@ struct ModelPickerView: View {
                                 .font(.callout).foregroundStyle(.orange)
                         }
                     }
-                    ForEach(g.models) { m in row(m) }
+                    ForEach(g.models) { m in row(m, label: shortLabel(m, in: g)) }
                 } header: {
                     header(g)
                 } footer: {
@@ -233,7 +233,9 @@ struct ModelPickerView: View {
                             .font(.caption2)
                             .foregroundStyle(op.isActive ? Color.green : Color.orange)
                     }
-                    if let n = m.note, !n.isEmpty {
+                    // the provider's generic note ("through Orbit's translating gateway") says
+                    // nothing a heading doesn't; the model's own size and spend matter more
+                    if let n = m.note, !n.isEmpty, !Self.genericNote(n) {
                         Text(n).font(.caption2).foregroundStyle(.secondary)
                     } else if !m.isReady {
                         Text("needs an API key on your Mac")
@@ -260,6 +262,20 @@ struct ModelPickerView: View {
             }
             if let c = m.context { Text(contextText(c) + " context") }
         }
+    }
+
+    static func genericNote(_ n: String) -> Bool {
+        let t = n.lowercased()
+        return t.contains("translating gateway") || t.contains("orbit's gateway")
+    }
+
+    /// Under a provider's heading, "GLM-5 · OpenCode Go" is just "GLM-5".
+    private func shortLabel(_ m: ModelInfo, in g: ProviderGroup) -> String {
+        let full = m.display
+        guard let dot = full.range(of: " · ") else { return full }
+        let tail = full[dot.upperBound...].lowercased()
+        let title = g.title.lowercased()
+        return title.contains(tail) || tail.contains(title) ? String(full[..<dot.lowerBound]) : full
     }
 
     private func contextText(_ n: Int) -> String {
