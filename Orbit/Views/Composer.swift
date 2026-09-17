@@ -48,6 +48,8 @@ struct Composer: View {
     /// Library: the "/" menu (commands, saved prompts, Claude's commands) and what it opens.
     @StateObject private var slash = SlashController()
 
+    /// When you last sent or queued, so a double tap cannot land on Stop.
+    @State private var lastSubmit = Date.distantPast
     @State private var showAttachMenu = false
     @State private var showLibrary = false
     @State private var showCamera = false
@@ -139,6 +141,9 @@ struct Composer: View {
                 }
                 if state.streaming {
                     Button {
+                        // Stop takes the send button's place once the box is empty: a second tap
+                        // meant for Send (a double tap) must not stop the answer just started
+                        guard Date().timeIntervalSince(lastSubmit) > 1.2 else { return }
                         Task { await state.stopGenerating() }
                     } label: {
                         Image(systemName: "stop.fill")
@@ -257,6 +262,7 @@ struct Composer: View {
     /// waiting, a message joins the queue — `now` steers the running answer
     /// instead. A `/command` always runs straight away.
     private func submit(now: Bool = false) {
+        lastSubmit = Date()
         let raw = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         let text = Pastes.expand(raw, pastes)
         guard !text.isEmpty || !state.attachments.isEmpty else { return }
