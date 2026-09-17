@@ -522,8 +522,14 @@ struct ProjectEditor: View {
         p.name = p.name.trimmingCharacters(in: .whitespaces)
         p.folder = folder
         do {
-            try await server.saveProject(p)
+            let r = try await server.saveProjectNotingFolder(p)
             saved()
+            // saved either way; stay open so the warning is read before it is gone
+            if r.folderMissing {
+                project.id = r.id
+                self.error = "Saved — but that folder does not exist yet."
+                return
+            }
             dismiss()
         } catch { self.error = error.localizedDescription }
     }
