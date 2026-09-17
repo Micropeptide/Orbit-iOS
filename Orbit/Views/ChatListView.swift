@@ -69,6 +69,7 @@ struct ChatListView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
+                    FileSearchSection(query: search)
                     ForEach(dayGroups, id: \.0) { day, chats in
                      Section(day) {
                       ForEach(chats) { chat in

@@ -18,6 +18,7 @@ struct MacSettingsSection: View {
                 case "models": ModelsKeysView()
                 case "fallback": FallbackView()
                 case "general": MacGeneralView()
+                case "server": LocalServerView()
                 case "tools": ToolsRulesView()
                 case "mcp": MCPServersView()
                 case "claude": ClaudeCodeSettingsView()
@@ -50,6 +51,7 @@ struct MacSettingsSection: View {
                 Label("When a model keeps failing", systemImage: "arrow.triangle.branch")
             }
             NavigationLink { MacGeneralView() } label: { Label("General", systemImage: "slider.horizontal.3") }
+            NavigationLink { LocalServerView() } label: { Label("Local server", systemImage: "cpu") }
             NavigationLink { ToolsRulesView() } label: { Label("Tools & rules", systemImage: "wrench.and.screwdriver") }
             NavigationLink { MCPServersView() } label: { Label("MCP servers", systemImage: "puzzlepiece.extension") }
             NavigationLink { ClaudeCodeSettingsView() } label: { Label("Claude Code", systemImage: "terminal") }
