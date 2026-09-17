@@ -15,16 +15,18 @@ extension AppState {
         for src in ExternalSource.allCases {
             let had = chats.filter { $0.external == true && ExternalSource(chat: $0) == src }
             let got = items.contains { $0.external == true && ExternalSource(chat: $0) == src }
-            let key = "orbit.extShort." + src.rawValue
-            if !got, !had.isEmpty, !UserDefaults.standard.bool(forKey: key) {
-                UserDefaults.standard.set(true, forKey: key)
+            if !got, !had.isEmpty, !Self.keptOnce.contains(src) {
+                Self.keptOnce.insert(src)
                 out += had
             } else if got {
-                UserDefaults.standard.set(false, forKey: key)
+                Self.keptOnce.remove(src)
             }
         }
         return out
     }
+
+    /// Sources whose rows were kept through one refresh that lacked them.
+    private static var keptOnce: Set<ExternalSource> = []
 
     /// More chats than the Mac has listed so far.
     var moreChatsOnMac: Int {
