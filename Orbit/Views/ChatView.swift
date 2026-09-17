@@ -8,6 +8,9 @@ struct ChatView: View {
     /// and flash it rather than dumping you at the end of a long conversation.
     var highlight: Int? = nil
     @State private var flashed: Int? = nil
+    /// Whether the newest message is on screen, and whether more arrived while it was not.
+    @State private var atBottom = true
+    @State private var newBelow = false
     @EnvironmentObject var state: AppState
     @State private var draft = ""
     @State private var showModels = false
@@ -171,21 +174,55 @@ struct ChatView: View {
                                         in: .rect(cornerRadius: 10))
                             .id("row-\(i)")
                     }
-                    if state.streaming { liveBubble.id("live").environment(\.fileLinkSid, nil) }
+                    if state.streaming {
+                        // each finished step of the running answer is its own row: packed into one
+                        // tall row, the lazy list lost its layout and the answer went blank mid-way
+                        let continues = state.messages.last.map { !$0.isUser } ?? false
+                        ForEach(Array(state.liveSteps.enumerated()), id: \.element.id) { n, step in
+                            MessageBubble(message: step, showByline: n == 0 && !continues)
+                                .id(step.id)
+                                .environment(\.fileLinkSid, nil)
+                        }
+                        liveStepInHand.id("live").environment(\.fileLinkSid, nil)
+                    }
                     ChatPromptCards().id("prompts")
                     if let e = state.lastError, !state.streaming { errorNote(e) }
+                    // seen = you are at the newest message; new text follows you only then
                     Color.clear.frame(height: 8).id("bottom")
+                        .onAppear { atBottom = true; newBelow = false }
+                        .onDisappear { atBottom = false }
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 14)
             }
             .defaultScrollAnchor(.bottom)          // open at the newest message
             .scrollDismissesKeyboard(.interactively)
-            .onChange(of: state.messages.count) { _, _ in scroll(proxy) }
-            .onChange(of: state.liveText) { _, _ in scroll(proxy) }
-            .onChange(of: state.liveRuns.count + state.liveSteps.count) { _, _ in scroll(proxy) }
-            .onChange(of: state.chatExtras.question?.id) { _, _ in scroll(proxy) }
-            .onChange(of: state.chatExtras.approval?.id) { _, _ in scroll(proxy) }
+            // what you send always brings you down; what arrives only follows you if you are
+            // already at the bottom -- reading further up, you stay where you are
+            .onChange(of: state.messages.count) { _, _ in
+                if state.messages.last?.isUser == true { scroll(proxy) } else { follow(proxy) }
+            }
+            .onChange(of: state.liveText) { _, _ in follow(proxy, animated: false) }
+            .onChange(of: state.liveRuns.count + state.liveSteps.count) { _, _ in follow(proxy) }
+            .onChange(of: state.chatExtras.question?.id) { _, _ in follow(proxy) }
+            .onChange(of: state.chatExtras.approval?.id) { _, _ in follow(proxy) }
+            .overlay(alignment: .bottom) {
+                if !atBottom && (newBelow || state.streaming) {
+                    Button {
+                        scroll(proxy); newBelow = false
+                    } label: {
+                        Label(newBelow ? "New messages" : "Latest", systemImage: "arrow.down")
+                            .font(.footnote.weight(.semibold))
+                            .padding(.horizontal, 12).padding(.vertical, 7)
+                            .background(.regularMaterial, in: Capsule())
+                            .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.bottom, 10)
+                    .transition(.opacity)
+                    .accessibilityHint("Scrolls to the newest message")
+                }
+            }
             .onChange(of: actionsModel.jumpRequest) { _, i in
                 guard let i else { return }
                 jumpTo = i
@@ -236,6 +273,12 @@ struct ChatView: View {
         .padding(11)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(.orange.opacity(0.10), in: .rect(cornerRadius: 10))
+    }
+
+    /// Keeps up with a growing answer only while you are at the bottom; otherwise marks
+    /// that something new arrived below.
+    private func follow(_ proxy: ScrollViewProxy, animated: Bool = true) {
+        if atBottom { scroll(proxy, animated: animated) } else { newBelow = true }
     }
 
     private func scroll(_ proxy: ScrollViewProxy, animated: Bool = true) {
@@ -364,12 +407,10 @@ struct ChatView: View {
 
     /// The answer being written: the steps it has finished, then the one in hand.
     /// It continues the block above when that is already this answer's.
-    private var liveBubble: some View {
+    /// The step being written now (the finished steps are rows of their own above it).
+    private var liveStepInHand: some View {
         let continues = state.messages.last.map { !$0.isUser } ?? false
         return VStack(alignment: .leading, spacing: 18) {
-            ForEach(Array(state.liveSteps.enumerated()), id: \.element.id) { n, step in
-                MessageBubble(message: step, showByline: n == 0 && !continues)
-            }
             VStack(alignment: .leading, spacing: 7) {
                 if state.liveSteps.isEmpty && !continues {
                     Text(state.liveModel.isEmpty ? currentModelName : state.liveModel)
