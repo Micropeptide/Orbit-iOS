@@ -622,4 +622,16 @@ actor OrbitServer {
         try data.write(to: out, options: .atomic)
         return out
     }
+
+    // ------------------------------------------------------------ settings and administration
+
+    /// One authenticated call for OrbitServer+Settings.swift, which lives in its
+    /// own file and so cannot reach the private helpers above.
+    @discardableResult
+    func settingsCall(_ path: String, method: String = "GET", body: [String: Any]? = nil,
+                      timeout: TimeInterval? = nil) async throws -> Data {
+        var req = try request(path, method: method, body: method == "GET" ? nil : (body ?? [:]))
+        if let timeout { req.timeoutInterval = timeout }
+        return try await run(req)
+    }
 }
