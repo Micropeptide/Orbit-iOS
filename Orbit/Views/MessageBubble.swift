@@ -8,6 +8,8 @@ struct MessageBubble: View {
     var onQuote: ((Message) -> Void)? = nil
     /// Fork, retry deeper, continue, check DOIs, undo file changes (Views/Chat).
     var actions: MessageActions? = nil
+    /// One answer, one block: only its first step names the model.
+    var showByline = true
     @State private var shareImage: ShareImage?
 
     /// Uploaded images come back as data: URLs, which UIImage cannot read directly.
@@ -18,7 +20,9 @@ struct MessageBubble: View {
 
     var body: some View {
         Group {
-        if message.isUser {
+        if message.isUser, let bang = message.bang {
+            BangBlock(run: bang)
+        } else if message.isUser {
             VStack(alignment: .trailing, spacing: 7) {
             ForEach(message.images ?? [], id: \.self) { src in
                 if let data = Self.decodeDataURL(src), let ui = UIImage(data: data) {
@@ -56,14 +60,16 @@ struct MessageBubble: View {
             .frame(maxWidth: .infinity, alignment: .trailing)
         } else {
             VStack(alignment: .leading, spacing: 7) {
-                if let model = message.model, !model.isEmpty {
+                if showByline, let model = message.model, !model.isEmpty {
                     Text(model).font(.caption2.smallCaps()).foregroundStyle(.secondary)
                 }
-                ForEach(message.tools ?? [], id: \.self) { ToolLine(text: $0) }
+                // a step reads in the order it happened: what it said, then the tools it called
+                if !message.text.isEmpty { MarkdownText(message.text) }
+                ForEach(toolLines, id: \.self) { ToolLine(text: $0) }
+                if let runs = message.tool_runs, !runs.isEmpty { ToolRunsView(runs: runs) }
                 ForEach(message.plots ?? [], id: \.self) { MessageImage(path: $0) }
-                MarkdownText(message.text)
                 if let thinking = message.thinking, !thinking.isEmpty {
-                    ThinkingBlock(text: thinking)
+                    ThinkingBlock(text: thinking, secs: message.thoughtFor)
                 }
                 AnswerFooter(message: message, actions: actions)
             }
@@ -91,6 +97,14 @@ struct MessageBubble: View {
         }
         }
         .sheet(item: $shareImage) { ActivityView(items: [$0.image]).ignoresSafeArea() }
+    }
+
+    /// With tool rows to show, the saved list of tool names says nothing new;
+    /// only the notices (auto-approved, refused, a switch of model) stay.
+    private var toolLines: [String] {
+        let lines = message.tools ?? []
+        guard message.tool_runs?.isEmpty == false else { return lines }
+        return lines.filter { $0.hasPrefix("✓") || $0.hasPrefix("↪") || $0.hasPrefix("refused") }
     }
 
     /// The answer as a picture — for a group chat that would mangle Markdown.

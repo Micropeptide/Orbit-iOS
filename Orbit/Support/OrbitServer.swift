@@ -440,12 +440,12 @@ actor OrbitServer {
         case "content_delta":  return .content(p as? String ?? "")
         case "thinking_delta": return .thinking(p as? String ?? "")
         case "model":          return .model(str("label").isEmpty ? str("id") : str("label"))
+        // a call and its result pair up by id, so each row can say what came back
         case "tool":
-            let args = ((p as? [String: Any])?["args"] as? [String: Any]) ?? [:]
-            let rendered = args.map { "\($0.key)=\(String(describing: $0.value).prefix(40))" }
-                               .sorted().joined(separator: ", ")
-            return .tool(name: str("name"), args: rendered)
-        case "tool_result":    return .toolResult(name: str("name"), output: str("output"))
+            return .tool(ToolRun(event: (p as? [String: Any]) ?? [:], finished: false))
+        case "tool_result":
+            let d = (p as? [String: Any]) ?? [:]
+            return .toolResult(ToolRun(event: d, finished: true), diff: ShownDiff(d["diff"]))
         case "server_starting":
             let msg = str("msg")
             return .status(msg.isEmpty ? "starting the model" : msg)

@@ -75,12 +75,23 @@ struct Message: Identifiable, Codable, Hashable {
     var usage: TokenUsage? = nil
     var changes: [String]? = nil
     var changes_undone: Bool? = nil
+    /// Each tool call this step made, with what came back.
+    var tool_runs: [ToolRun]? = nil
+    /// A command you ran with `!`, saved as your message.
+    var bang: BangRun? = nil
+    /// The plan tool's last list, when the Mac kept it with the message.
+    var plan: String? = nil
+    /// When each paragraph of thinking began: [[offset, seconds]].
+    var thinking_marks: [[Double]]? = nil
+    /// How long a live step thought for. Only known on this phone, so not saved.
+    var thoughtSecs: Double? = nil
 
     var isUser: Bool { role == "user" }
 
     enum CodingKeys: String, CodingKey {
         case role, text, images, plots, tools, model, thinking, note
         case t, secs, usage, changes, changes_undone
+        case tool_runs, bang, plan, thinking_marks
     }
 
     init(role: String, text: String, images: [String]? = nil, plots: [String]? = nil,
@@ -105,6 +116,10 @@ struct Message: Identifiable, Codable, Hashable {
         usage = try? c.decode(TokenUsage.self, forKey: .usage)
         changes = (try? c.decode([String?].self, forKey: .changes))?.compactMap { $0 }
         changes_undone = c.lenientBool(.changes_undone)
+        tool_runs = try? c.decode([ToolRun].self, forKey: .tool_runs)
+        bang = try? c.decode(BangRun.self, forKey: .bang)
+        plan = try? c.decode(String.self, forKey: .plan)
+        thinking_marks = try? c.decode([[Double]].self, forKey: .thinking_marks)
     }
 }
 
@@ -289,8 +304,8 @@ enum StreamEvent {
     case model(String)               // which model is answering
     case thinking(String)            // reasoning delta
     case content(String)             // answer delta
-    case tool(name: String, args: String)
-    case toolResult(name: String, output: String)
+    case tool(ToolRun)               // a call starting: running until its result
+    case toolResult(ToolRun, diff: ShownDiff?)
     case status(String)              // cold start, compaction, trimming
     case blocked(reason: String)
     case autoApproved(name: String, reason: String)

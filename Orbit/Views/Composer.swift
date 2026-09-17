@@ -15,9 +15,28 @@ struct Composer: View {
     var onCommand: ((String) -> Bool)? = nil
 
     static let commands: [(String, String)] = [
-        ("/new", "start a new chat"), ("/model", "change the model"),
+        ("/new", "start a new chat"), ("/model", "switch the model for this chat"),
         ("/compact", "compact the history"), ("/find", "find in this chat"),
+        ("/rewind", "go back to an earlier message — chat only, or files too"),
+        ("/context", "what is filling the context window right now"),
+        ("/copy", "copy the last answer (/copy 2 for the one before)"),
+        ("/diff", "every file change shown in this chat, as a diff"),
+        ("/verbose", "show every tool call in full, or fold them again"),
+        ("/todos", "show or hide the todo list"),
+        ("/usage", "cost, tokens and time — this chat and lately"),
+        ("/permissions", "what it may do without asking"),
+        ("/theme", "light, dark or follow the system"),
+        ("/fork", "copy this chat into a new one and carry on there"),
+        ("/help", "show these commands"),
     ]
+
+    /// A leading `!` runs a shell command; a single `# line` goes to memory.
+    private enum Mode { case message, shell, memory }
+    private var mode: Mode {
+        if draft.hasPrefix("!") { return .shell }
+        if draft.hasPrefix("# "), !draft.contains("\n") { return .memory }
+        return .message
+    }
     /// Library: the "/" menu (commands, saved prompts, Claude's commands) and what it opens.
     @StateObject private var slash = SlashController()
 
@@ -84,10 +103,11 @@ struct Composer: View {
 
                 TextField("Message", text: $draft, axis: .vertical)
                     .lineLimit(1...6)
+                    .font(mode == .shell ? .body.monospaced() : .body)
                     .focused(typing)
                     .padding(.horizontal, 14).padding(.vertical, 9)
                     .background(.background, in: .rect(cornerRadius: 20))
-                    .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(.quaternary))
+                    .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(modeBorder, lineWidth: mode == .message ? 1 : 1.5))
 
                 if state.streaming && canSend {
                     // a note for the running answer, read at its next step
@@ -119,8 +139,18 @@ struct Composer: View {
                 } else {
                     Button {
                         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+                        let sending = mode
                         draft = ""
                         Haptics.tap()
+                        if sending == .shell {
+                            let cmd = String(text.dropFirst()).trimmingCharacters(in: .whitespaces)
+                            if !cmd.isEmpty { Task { await state.runBang(cmd) } }
+                            return
+                        }
+                        if sending == .memory {
+                            Task { await state.rememberLine(String(text.dropFirst(2))) }
+                            return
+                        }
                         if text.hasPrefix("/"), let replaced = slash.intercept(text, state: state) {
                             draft = replaced      // a saved prompt expands in place; a Library command ran
                             return
@@ -155,9 +185,16 @@ struct Composer: View {
             }
             .padding(.horizontal, 12)
             .padding(.top, 8)
-            .padding(.bottom, 8)
+            .padding(.bottom, mode == .message ? 6 : 4)
+            if let hint = modeHint {
+                Text(hint)
+                    .font(.caption2)
+                    .foregroundStyle(modeBorder)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16).padding(.bottom, 4)
+            }
+            PermissionModeLine()
         }
-        .background(.bar)
         .slashSheets(slash)
         .sheet(isPresented: $showLater) {
             SendLaterSheet { date, rep in schedule(at: date, repeat: rep) }
@@ -194,6 +231,22 @@ struct Composer: View {
             if case .success(let urls) = result {
                 Task { for u in urls { await state.attach(fileAt: u) } }
             }
+        }
+    }
+
+    private var modeBorder: AnyShapeStyle {
+        switch mode {
+        case .shell: return AnyShapeStyle(Color.orange)
+        case .memory: return AnyShapeStyle(Color.purple)
+        case .message: return AnyShapeStyle(.quaternary)
+        }
+    }
+
+    private var modeHint: String? {
+        switch mode {
+        case .shell: return "! shell mode — runs in this chat's folder; the output joins the conversation"
+        case .memory: return "# memory — send saves this line to memory"
+        case .message: return nil
         }
     }
 
