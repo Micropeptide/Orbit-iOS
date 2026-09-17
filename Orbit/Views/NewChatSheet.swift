@@ -19,6 +19,9 @@ struct NewChatSheet: View {
     /// A chat an earlier attempt made before something was refused — reused,
     /// so trying again does not leave empty chats behind.
     @State private var madeSid: String?
+    // presets (Views/Chat/ChatPresets.swift)
+    @State private var presets: [ChatPreset] = []
+    @State private var presetName = ""
 
     private var modelName: String {
         guard let model else { return "Choose a model" }
@@ -28,6 +31,12 @@ struct NewChatSheet: View {
     var body: some View {
         NavigationStack {
             Form {
+                if !presets.isEmpty {
+                    ChatPresetsSection(presets: $presets, disabled: creating || !ready) { p in
+                        Task { await start(p) }
+                    }
+                }
+
                 Section {
                     Picker("Harness", selection: Binding(get: { harness }, set: { switchHarness($0) })) {
                         ForEach(HarnessKind.allCases) { Text($0.label).tag($0) }
@@ -58,6 +67,8 @@ struct NewChatSheet: View {
                     WorkPlaceSections(host: $host, folder: $folder, harness: harness)
                     PermissionModeSection(mode: $mode, harness: harness)
                 }
+
+                SavePresetSection(name: $presetName)
 
                 if let error {
                     Section {
@@ -114,8 +125,10 @@ struct NewChatSheet: View {
         harness = state.harnessMode
         model = state.suggestedModel(for: harness)
         async let hosts: Void = state.loadHosts()
+        async let saved = try? state.server?.chatPresets()
         let defaults = try? await state.server?.chatWork(sid: "")
         await hosts
+        presets = (await saved ?? nil) ?? []
         if let d = defaults {
             mode = d.defaultMode
             if let h = d.defaultHost {
@@ -157,12 +170,53 @@ struct NewChatSheet: View {
         do {
             try await state.configureChat(sid, model: model, harness: harness, host: host,
                                           folder: folder, mode: harness.isAgent ? mode : nil)
+            await savePresetIfNamed()
             Haptics.success()
             madeSid = nil
             dismiss()
             onCreated(sid)
         } catch {
             self.error = error.localizedDescription
+        }
+    }
+
+    // ------------------------------------------------------------ presets
+
+    /// Start straight from a preset, as the Mac's "start" does.
+    private func start(_ p: ChatPreset) async {
+        creating = true
+        error = nil
+        defer { creating = false }
+        if let sid = madeSid {
+            // an empty chat an earlier Create left behind
+            await state.delete(sid)
+            madeSid = nil
+        }
+        state.lastError = nil
+        guard let sid = await state.startChat(from: p) else {
+            error = state.lastError ?? "Your Mac didn't start a chat."
+            return
+        }
+        if let e = state.lastError { state.toast("Started, but not fully set up: \(e)") }
+        Haptics.success()
+        dismiss()
+        onCreated(sid)
+    }
+
+    /// With a name typed, this sheet's choices are saved as a preset. A failure
+    /// to save does not stop the chat.
+    private func savePresetIfNamed() async {
+        let name = presetName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, let server = state.server else { return }
+        let p = ChatPreset(name: name, model: model ?? "",
+                           cwd: harness.isAgent ? folder.trimmingCharacters(in: .whitespacesAndNewlines) : "",
+                           mode: harness.isAgent ? mode.rawValue : "",
+                           host: harness.isAgent ? host : "")
+        do {
+            try await server.savePresets(presets + [p])
+            presetName = ""
+        } catch {
+            state.toast("The preset wasn't saved: \(error.localizedDescription)")
         }
     }
 
