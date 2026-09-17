@@ -25,6 +25,7 @@ struct SettingsView: View {
             "Chats: \(state.chats.count) · projects: \(state.projects.count)",
             "Backup: " + (state.backup.map { ($0.enabled ? "on" : "off") + " · last " + ($0.last?.name ?? "never") } ?? "unknown"),
             "Autonomy: " + (state.autonomy?.autonomy_mode ?? "unknown"),
+            "Harness: \(state.harnessMode.label) · hosts: \(state.remoteHosts.count)",
             "Last error: \(state.lastError ?? "none")",
         ].joined(separator: "\n")
     }
@@ -33,6 +34,7 @@ struct SettingsView: View {
         NavigationStack {
             List {
                 ServerControlView()
+                HarnessSection()
                 AutonomySection()
                 BackupSection()
 

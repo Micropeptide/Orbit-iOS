@@ -128,6 +128,29 @@ struct ModelList: Codable {
     var models: [ModelInfo]
     var current: String?
     var `default`: String?
+    /// Which harness new chats use — Claude Code, Codex, or (both false) Orbit's own.
+    var harness_mode: Bool?
+    var codex_mode: Bool?
+    /// The models last used in each harness, newest first.
+    var harness_recent: [RecentModel]?
+    var codex_recent: [RecentModel]?
+
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        models = try c.decode([ModelInfo].self, forKey: .models)
+        current = try? c.decode(String.self, forKey: .current)
+        `default` = try? c.decode(String.self, forKey: .default)
+        // newer fields must never cost the model list itself
+        harness_mode = c.lenientBool(.harness_mode)
+        codex_mode = c.lenientBool(.codex_mode)
+        harness_recent = try? c.decode([RecentModel].self, forKey: .harness_recent)
+        codex_recent = try? c.decode([RecentModel].self, forKey: .codex_recent)
+    }
+}
+
+struct RecentModel: Codable, Hashable {
+    var id: String
+    var label: String?
 }
 
 /// The Mac's automatic backup — where it goes and when it last ran.
