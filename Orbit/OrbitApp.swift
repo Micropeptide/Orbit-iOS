@@ -29,18 +29,24 @@ struct OrbitApp: App {
                     await state.runDebugScript()
                     #endif
                 }
-                .onChange(of: phase) { _, new in
+                .onChange(of: phase) { old, new in
                     state.backgrounded = (new != .active)
                     switch new {
                     case .active:
                         // coming back from the lock screen should show the truth,
                         // not whatever was on screen twenty minutes ago
                         state.endBackgroundGrace()
+                        // back from the background only (an alert, Control Center or Face ID passes
+                        // through "inactive" and leaves the stream alive); coming back runs
+                        // background -> inactive -> active, so remember the trip rather than `old`
+                        let fromBackground = state.wentToBackground
+                        state.wentToBackground = false
                         Task {
                             await state.refreshEverything()
-                            await state.resyncLive()      // the stream rarely survives the lock screen
+                            if fromBackground { await state.resyncLive() }   // the stream rarely survives the lock screen
                         }
                     case .background:
+                        state.wentToBackground = true
                         // hold the app awake briefly so an answer in flight can
                         // finish and announce itself
                         if state.streaming { state.beginBackgroundGrace() }
