@@ -100,6 +100,7 @@ extension AppState {
                 throw OrbitServer.Failure.server(409, "that chat is still answering")
             }
             let text = try await server.regenerateOnMac(sid: sid, deeper: deeper)
+            if let last = messages.last(where: { $0.isUser && $0.note != true }) { forgetExtras(from: last) }
             if let i = messages.lastIndex(where: \.isUser) {
                 messages.removeSubrange(i...)
             }
@@ -168,6 +169,7 @@ extension AppState {
         do {
             try await server.burn(sid: sid)
             chatExtras.tempSid = nil
+            forgetUnseen(sid)
             Drafts.save(sid, "")
             if openChat?.sid == sid { openChat = nil; messages = [] }
             await loadChats()

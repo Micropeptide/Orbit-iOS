@@ -50,10 +50,10 @@ enum TranscriptEvent {
         let msg = (d["msg"] as? String) ?? ""
         switch kind {
         case "sources":
-            let hits = ((p as? [Any]) ?? []).compactMap { SourceHit($0 as? [String: Any]) }
+            let hits = ((p as? [Any]) ?? []).enumerated().compactMap { SourceHit($0.element as? [String: Any], index: $0.offset) }
             return hits.isEmpty ? nil : .sources(hits)
         case "weak_claims":
-            let claims = ((p as? [Any]) ?? []).compactMap { WeakClaim($0 as? [String: Any]) }
+            let claims = ((p as? [Any]) ?? []).enumerated().compactMap { WeakClaim($0.element as? [String: Any], index: $0.offset) }
             return claims.isEmpty ? nil : .weakClaims(claims)
         case "injection":
             return .injection(name: (d["name"] as? String) ?? "a tool", markers: strings(d["markers"]))
@@ -95,10 +95,13 @@ struct SourceHit: Hashable, Identifiable {
     var doc: String
     var score: String
     var snippet: String
-    var id: String { doc + "\u{0}" + snippet.prefix(40) }
+    /// Where it came in the list: the same document and opening words can come twice.
+    var index = 0
+    var id: String { "\(index)\u{0}" + doc }
 
-    init?(_ d: [String: Any]?) {
+    init?(_ d: [String: Any]?, index: Int = 0) {
         guard let d, let doc = d["doc"] as? String else { return nil }
+        self.index = index
         self.doc = doc
         if let n = d["score"] as? Double { score = String(format: "%.2f", n) }
         else { score = d["score"].map { "\($0)" } ?? "" }
@@ -109,10 +112,13 @@ struct SourceHit: Hashable, Identifiable {
 struct WeakClaim: Hashable, Identifiable {
     var sentence: String
     var support: Double
-    var id: String { sentence }
+    /// Where it came in the list: the same sentence can be flagged twice.
+    var index = 0
+    var id: String { "\(index)\u{0}" + sentence }
 
-    init?(_ d: [String: Any]?) {
+    init?(_ d: [String: Any]?, index: Int = 0) {
         guard let d, let s = d["sentence"] as? String else { return nil }
+        self.index = index
         sentence = s
         support = (d["support"] as? Double) ?? Double(TranscriptEvent.int(d["support"]))
     }
