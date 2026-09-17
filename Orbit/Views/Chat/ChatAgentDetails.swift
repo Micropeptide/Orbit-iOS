@@ -79,6 +79,12 @@ struct ChatAgentDetailSections: View {
     @State private var hostNote: String?
     @State private var confirmCopyLogin = false
 
+    /// Whether Claude Code is answering in this chat now. `info.running` is only
+    /// what it was when the sheet opened; the app's own state follows it after that.
+    private var running: Bool {
+        (state.streaming && state.openChat?.sid == sid) || state.runningChats.contains(sid)
+    }
+
     var body: some View {
         if let cmd = info.terminalCommand {
             Section {
@@ -153,7 +159,7 @@ struct ChatAgentDetailSections: View {
         } header: {
             Text("While it answers")
         } footer: {
-            Text(info.running ? "Claude Code is answering: ask it directly."
+            Text(running ? "Claude Code is answering: ask it directly."
                               : "Available while Claude Code is answering in this chat.")
         }
         .sheet(item: $reply) { r in ControlReplyView(reply: r) }
@@ -168,7 +174,7 @@ struct ChatAgentDetailSections: View {
                 if asking == subtype { Spacer(); ProgressView().controlSize(.small) }
             }
         }
-        .disabled(!info.running || asking != nil)
+        .disabled(!running || asking != nil)
     }
 
     private func ask(_ title: String, _ subtype: String) async {

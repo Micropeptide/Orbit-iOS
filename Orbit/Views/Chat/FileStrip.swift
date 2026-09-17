@@ -173,14 +173,18 @@ struct FileMenuItems: View {
                 Label("Copy contents", systemImage: "text.alignleft")
             }
         }
+        // both go into the open chat's message box, so they need that chat on screen
+        let inChat = state.openChat?.sid == sid
         if !file.isFolder && !remote {
             Button {
                 Task { await state.attachExisting(file) }
             } label: { Label("Attach to your next message", systemImage: "paperclip") }
+            .disabled(!inChat)
         }
         Button { state.insertInDraft(remote ? path : rel) } label: {
             Label("Insert path in message", systemImage: "text.insert")
         }
+        .disabled(!inChat)
     }
 
     private func copy(_ s: String) {

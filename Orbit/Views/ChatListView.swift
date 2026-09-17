@@ -12,6 +12,9 @@ struct ChatListView: View {
     @State private var project: String? = nil        // nil = all projects
     @State private var jump: SearchHit?
     @State private var newWith = false
+    /// A file found by search, in QuickLook. Held here, on the list, so refreshing
+    /// the search results does not close it.
+    @State private var filePreview: URL?
     // filters, tags, projects, status (Views/Chat/ChatListExtras.swift)
     @State private var filter: ChatFilter = .active
     @State private var tagFilter: String? = nil
@@ -77,7 +80,7 @@ struct ChatListView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
-                    FileSearchSection(query: search)
+                    FileSearchSection(query: search, preview: $filePreview)
                     ForEach(dayGroups, id: \.0) { day, chats in
                      Section(day) {
                       ForEach(chats) { chat in listRow(chat) }
@@ -95,6 +98,7 @@ struct ChatListView: View {
                 }
                 .listStyle(.plain)
                 .refreshable { await state.refreshEverything() }
+                .quickLookPreview($filePreview)
             }
             .navigationTitle(shortMacName)
             .navigationBarTitleDisplayMode(.inline)
