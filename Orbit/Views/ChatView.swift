@@ -129,6 +129,8 @@ struct ChatView: View {
 
     private var currentModelName: String { state.currentModelName }
 
+    private var transcriptRows: [TranscriptRow] { TranscriptRow.build(state.messages) }
+
     // ------------------------------------------------------------ transcript
 
     private var transcript: some View {
@@ -150,7 +152,7 @@ struct ChatView: View {
                         .frame(maxWidth: .infinity)
                         .padding(.top, 80).padding(.horizontal, 24)
                     }
-                    let rows = TranscriptRow.build(state.messages)
+                    let rows = transcriptRows
                     ForEach(rows) { row in
                         let i = row.index
                         let m = row.message
@@ -162,6 +164,7 @@ struct ChatView: View {
                                       actions: actionsModel.actions(state),
                                       showByline: row.showByline)
                             .id(m.id)
+                            .padding(.top, row.joinsPrevious ? -12 : 0)
                             .padding(.horizontal, flashed == i ? 8 : 0)
                             .padding(.vertical, flashed == i ? 6 : 0)
                             .background(flashed == i ? Color.yellow.opacity(0.18) : .clear,
