@@ -180,22 +180,33 @@ struct QueuedMessageEditor: View {
     }
 }
 
-/// The open chat's waiting messages, above the composer: what is queued
-/// behind the running answer and what is scheduled, with the means to change them.
+/// The open chat's waiting messages, above the composer, laid out as the Mac's
+/// queue box: "Queued · N" in the order they will go, with what the queue is
+/// doing, then "Scheduled · N" by time. Drag a queued one to reorder it.
 struct QueueStrip: View {
     @EnvironmentObject var state: AppState
     @State private var open = false
     @State private var editing: QueueItem?
+    @State private var confirmClear = false
+    @State private var confirmStop: QueueItem?
 
     private var items: [QueueItem] { state.queue.items }
+    private var queued: [QueueItem] { items.filter { !$0.isScheduled } }
+    private var scheduled: [QueueItem] {
+        items.filter(\.isScheduled).sorted { ($0.at ?? 0) < ($1.at ?? 0) }
+    }
+
+    /// What the queue is doing, in the web's words.
+    private var queueState: String {
+        if state.queue.paused == true { return "paused after Stop" }
+        return state.queue.running == true ? "each starts when the one before it is answered" : "starting…"
+    }
 
     private var summary: String {
-        let later = items.filter(\.isScheduled).count
-        let waiting = items.count - later
         var bits: [String] = []
-        if waiting > 0 { bits.append("\(waiting) queued") }
-        if later > 0 { bits.append("\(later) scheduled") }
-        if state.queue.paused == true { bits.append("paused") }
+        if !queued.isEmpty { bits.append("Queued · \(queued.count)") }
+        if !scheduled.isEmpty { bits.append("Scheduled · \(scheduled.count)") }
+        if state.queue.paused == true, !queued.isEmpty { bits.append("paused") }
         return bits.joined(separator: " · ")
     }
 
@@ -205,10 +216,10 @@ struct QueueStrip: View {
                 withAnimation(.easeInOut(duration: 0.15)) { open.toggle() }
             } label: {
                 HStack(spacing: 6) {
-                    Image(systemName: items.contains(where: \.isScheduled) ? "clock" : "tray.full")
+                    Image(systemName: queued.isEmpty ? "clock" : "tray.full")
                         .font(.caption)
                     Text(summary).font(.caption.weight(.medium))
-                    if !open, let first = items.first {
+                    if !open, let first = queued.first ?? scheduled.first {
                         Text(first.text).font(.caption).lineLimit(1).foregroundStyle(.tertiary)
                     }
                     Spacer()
@@ -224,9 +235,9 @@ struct QueueStrip: View {
             if open {
                 // a few fit as they are; a long queue scrolls in a bounded box
                 if items.count <= 3 {
-                    rows
+                    sections
                 } else {
-                    ScrollView { rows }.frame(maxHeight: 230)
+                    ScrollView { sections }.frame(maxHeight: 260)
                 }
             }
         }
@@ -238,29 +249,91 @@ struct QueueStrip: View {
                 await save(item, r)
             }
         }
+        .confirmationDialog("Remove all queued messages?", isPresented: $confirmClear,
+                            titleVisibility: .visible) {
+            Button("Remove \(queued.count) queued", role: .destructive) {
+                Task { await state.clearQueued() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Scheduled ones stay.")
+        }
+        .confirmationDialog("Stop this repeating message?",
+                            isPresented: Binding(get: { confirmStop != nil }, set: { if !$0 { confirmStop = nil } }),
+                            titleVisibility: .visible, presenting: confirmStop) { item in
+            Button("Stop repeating it", role: .destructive) {
+                Task { await state.queueOp("remove", ["id": item.id]) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { item in
+            Text("“\(String(item.text.prefix(60)))” will not go out again.")
+        }
     }
 
-    private var rows: some View {
-        VStack(spacing: 6) {
-            ForEach(Array(items.enumerated()), id: \.element.id) { i, item in
-                row(item, index: i)
+    private var sections: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if !queued.isEmpty {
+                queuedHeader
+                ForEach(Array(queued.enumerated()), id: \.element.id) { i, item in
+                    row(item, index: i)
+                        .draggable(item.id) { dragPreview(item) }
+                        .dropDestination(for: String.self) { ids, _ in
+                            guard let id = ids.first, id != item.id else { return false }
+                            Task { await state.moveQueued(id, before: item.id) }
+                            return true
+                        }
+                }
             }
-            if state.queue.paused == true {
-                Button("Resume the queue") { Task { await state.queueOp("resume") } }
-                    .font(.caption.weight(.semibold))
+            if !scheduled.isEmpty {
+                Text("Scheduled · \(scheduled.count)")
+                    .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    .padding(.top, queued.isEmpty ? 0 : 4).padding(.leading, 2)
+                ForEach(scheduled) { item in row(item, index: nil) }
             }
         }
         .padding(.horizontal, 12).padding(.bottom, 6)
     }
 
-    private func row(_ item: QueueItem, index: Int) -> some View {
-        HStack(alignment: .top, spacing: 9) {
-            Image(systemName: item.isScheduled ? (item.missed ? "clock.badge.exclamationmark" : "clock")
-                                               : "hourglass")
+    private var queuedHeader: some View {
+        HStack(spacing: 8) {
+            Text("Queued · \(queued.count)").font(.caption.weight(.semibold))
+            Text(queueState).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+            Spacer(minLength: 4)
+            if state.queue.paused == true {
+                Button("Resume") { Task { await state.resumeQueue() } }
+                    .font(.caption.weight(.semibold))
+            } else if state.queue.running == true {
+                Button("Pause") { Task { await state.queueOp("pause") } }
+                    .font(.caption)
+                    .accessibilityHint("The next one waits after this answer, until you resume")
+            }
+            Button("Clear") { confirmClear = true }
                 .font(.caption)
-                .foregroundStyle(item.missed ? .orange : .secondary)
-                .frame(width: 16)
-                .padding(.top, 2)
+                .accessibilityHint("Removes every queued message; scheduled ones stay")
+        }
+        .padding(.leading, 2)
+    }
+
+    private func dragPreview(_ item: QueueItem) -> some View {
+        Text(item.text.isEmpty ? "(attachments only)" : item.text)
+            .font(.footnote).lineLimit(2)
+            .padding(8)
+            .background(.regularMaterial, in: .rect(cornerRadius: 8))
+    }
+
+    /// One waiting message. `index` is its place in line; nil for a scheduled one.
+    private func row(_ item: QueueItem, index: Int?) -> some View {
+        HStack(alignment: .top, spacing: 9) {
+            Group {
+                if let index {
+                    Text("\(index + 1)").font(.caption.monospacedDigit().weight(.semibold))
+                } else {
+                    Image(systemName: item.missed ? "clock.badge.exclamationmark" : "clock").font(.caption)
+                }
+            }
+            .foregroundStyle(item.missed ? .orange : .secondary)
+            .frame(width: 16)
+            .padding(.top, 2)
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.text.isEmpty ? "(attachments only)" : item.text)
                     .font(.footnote).lineLimit(2)
@@ -276,23 +349,33 @@ struct QueueStrip: View {
                 }
                 .font(.caption2).foregroundStyle(item.missed ? .orange : .secondary)
             }
+            .contentShape(Rectangle())
+            .onTapGesture { editing = item }
             Spacer(minLength: 4)
             Menu {
                 Button { editing = item } label: { Label("Edit", systemImage: "pencil") }
-                Button { Task { await state.queueOp("now", ["id": item.id]) } } label: {
-                    Label("Send now", systemImage: "paperplane")
+                Button { Task { await state.sendQueuedNow(item) } } label: {
+                    if state.streaming && item.attachments.isEmpty {
+                        Label("Send into the running answer now", systemImage: "arrow.turn.down.right")
+                    } else {
+                        Label("Send now", systemImage: "paperplane")
+                    }
                 }
-                if items.count > 1 {
+                if let index, queued.count > 1 {
                     if index > 0 {
                         Button { move(index, by: -1) } label: { Label("Move up", systemImage: "arrow.up") }
                     }
-                    if index < items.count - 1 {
+                    if index < queued.count - 1 {
                         Button { move(index, by: 1) } label: { Label("Move down", systemImage: "arrow.down") }
                     }
                 }
                 Divider()
                 Button(role: .destructive) {
-                    Task { await state.queueOp("remove", ["id": item.id]) }
+                    if item.isScheduled, !(item.repeatKind ?? "").isEmpty {
+                        confirmStop = item
+                    } else {
+                        Task { await state.queueOp("remove", ["id": item.id]) }
+                    }
                 } label: { Label("Remove", systemImage: "trash") }
             } label: {
                 Image(systemName: "ellipsis.circle").font(.body)
@@ -310,13 +393,14 @@ struct QueueStrip: View {
         return item.missed ? "missed · was \(When.describe(d))" : When.describe(d)
     }
 
+    /// Up or down one place among the queued messages.
     private func move(_ index: Int, by delta: Int) {
-        var ids = items.map(\.id)
+        let ids = queued.map(\.id)
         let to = index + delta
         guard ids.indices.contains(to) else { return }
-        ids.swapAt(index, to)
-        Haptics.tap()
-        Task { await state.queueOp("order", ["ids": ids]) }
+        // moving down is moving in front of the one after the next
+        let target: String? = delta < 0 ? ids[to] : (to + 1 < ids.count ? ids[to + 1] : nil)
+        Task { await state.moveQueued(ids[index], before: target) }
     }
 
     private func save(_ item: QueueItem, _ r: QueuedMessageEditor.Result) async {

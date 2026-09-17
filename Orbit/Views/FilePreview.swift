@@ -59,6 +59,19 @@ struct FilePreviewSheet: View {
                             UIPasteboard.general.string = info.displayName
                             Haptics.success()
                         } label: { Label("Copy name", systemImage: "textformat") }
+                        // from a chat: the file can go with the next message there
+                        if state.openChat?.sid == target.sid, info.path != nil {
+                            Divider()
+                            if !info.isFolder {
+                                Button {
+                                    Task { await state.attachExisting(info); dismiss() }
+                                } label: { Label("Attach to message", systemImage: "paperclip") }
+                            }
+                            Button {
+                                state.insertInDraft(info.path ?? info.displayName)
+                                dismiss()
+                            } label: { Label("Insert path in message", systemImage: "text.insert") }
+                        }
                     } label: {
                         if sharing { ProgressView().controlSize(.small) }
                         else { Image(systemName: "square.and.arrow.up") }
