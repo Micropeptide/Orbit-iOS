@@ -22,12 +22,16 @@ struct ChatSummary: Identifiable, Codable, Hashable {
     var archived: Bool?
     var project: String?
     var tags: [String]?
+    // chat list status: messages waiting in its queue, the next scheduled one
+    var queued: Int?
+    var scheduled: Double?
 
     var displayTitle: String { (title?.isEmpty == false ? title! : "New chat") }
     var date: Date { Date(timeIntervalSince1970: mtime) }
 
     enum CodingKeys: String, CodingKey {
         case id, title, n, mtime, pinned, archived, project, tags
+        case queued, scheduled
     }
 
     init(from d: Decoder) throws {
@@ -40,6 +44,8 @@ struct ChatSummary: Identifiable, Codable, Hashable {
         archived = try? c.decode(Bool.self, forKey: .archived)
         project = try? c.decode(String.self, forKey: .project)
         tags = try? c.decode([String].self, forKey: .tags)
+        queued = c.lenientDouble(.queued).map { Int($0) }
+        scheduled = c.lenientDouble(.scheduled)
     }
 }
 
@@ -62,10 +68,44 @@ struct Message: Identifiable, Codable, Hashable {
     var thinking: String?
     /// A note sent while an answer was running, which it read at its next step.
     var note: Bool? = nil
+    // saved with an answer: when it was written, how long it took, its tokens,
+    // and the files it changed (undoable until undone)
+    var t: Double? = nil
+    var secs: Double? = nil
+    var usage: TokenUsage? = nil
+    var changes: [String]? = nil
+    var changes_undone: Bool? = nil
 
     var isUser: Bool { role == "user" }
 
-    enum CodingKeys: String, CodingKey { case role, text, images, plots, tools, model, thinking, note }
+    enum CodingKeys: String, CodingKey {
+        case role, text, images, plots, tools, model, thinking, note
+        case t, secs, usage, changes, changes_undone
+    }
+
+    init(role: String, text: String, images: [String]? = nil, plots: [String]? = nil,
+         tools: [String]? = nil, model: String? = nil, thinking: String? = nil, note: Bool? = nil) {
+        self.role = role; self.text = text; self.images = images; self.plots = plots
+        self.tools = tools; self.model = model; self.thinking = thinking; self.note = note
+    }
+
+    /// Lenient, so one odd field in a saved answer never loses the whole chat.
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        role = (try? c.decode(String.self, forKey: .role)) ?? "assistant"
+        text = (try? c.decode(String.self, forKey: .text)) ?? ""
+        images = try? c.decode([String].self, forKey: .images)
+        plots = try? c.decode([String].self, forKey: .plots)
+        tools = try? c.decode([String].self, forKey: .tools)
+        model = try? c.decode(String.self, forKey: .model)
+        thinking = try? c.decode(String.self, forKey: .thinking)
+        note = try? c.decode(Bool.self, forKey: .note)
+        t = c.lenientDouble(.t)
+        secs = c.lenientDouble(.secs)
+        usage = try? c.decode(TokenUsage.self, forKey: .usage)
+        changes = (try? c.decode([String?].self, forKey: .changes))?.compactMap { $0 }
+        changes_undone = c.lenientBool(.changes_undone)
+    }
 }
 
 struct ChatDetail: Codable {
@@ -77,6 +117,7 @@ struct ChatDetail: Codable {
     var n: Int?
     var running: Bool?
     var context: ContextState?
+    var plan_mode: Bool?
 }
 
 struct ContextState: Codable, Hashable {
@@ -223,6 +264,11 @@ enum StreamEvent {
     /// Something worth a line in the answer that is not the answer itself —
     /// a fallback to another model, a message put off until later.
     case notice(String)
+    /// A question the model asks mid-answer, an approval with its details,
+    /// and an answer that stopped at its round or time limit.
+    case question(AskQuestion)
+    case approvalPrompt(ApprovalPrompt)
+    case roundLimit(String)
     case error(String)
     case end(sid: String?, title: String?)
 }

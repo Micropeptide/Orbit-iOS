@@ -41,7 +41,7 @@ actor OrbitServer {
         }
     }
 
-    private func request(_ path: String, method: String = "GET",
+    func request(_ path: String, method: String = "GET",
                          body: [String: Any]? = nil) throws -> URLRequest {
         guard let base = pairing.base,
               let url = URL(string: path, relativeTo: base) else { throw Failure.notPaired }
@@ -57,7 +57,7 @@ actor OrbitServer {
         return r
     }
 
-    private func run(_ req: URLRequest) async throws -> Data {
+    func run(_ req: URLRequest) async throws -> Data {
         do {
             let (data, resp) = try await session.data(for: req)
             let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
@@ -80,14 +80,14 @@ actor OrbitServer {
         }
     }
 
-    private func get<T: Decodable>(_ path: String, as: T.Type) async throws -> T {
+    func get<T: Decodable>(_ path: String, as: T.Type) async throws -> T {
         let data = try await run(try request(path))
         do { return try JSONDecoder().decode(T.self, from: data) }
         catch { throw Failure.decoding("\(error)") }
     }
 
     @discardableResult
-    private func post(_ path: String, _ body: [String: Any] = [:]) async throws -> Data {
+    func post(_ path: String, _ body: [String: Any] = [:]) async throws -> Data {
         try await run(try request(path, method: "POST", body: body))
     }
 
@@ -386,12 +386,14 @@ actor OrbitServer {
     /// The server speaks server-sent events; `URLSession.bytes` gives us the body
     /// as it arrives, so this is a plain line reader rather than a dependency.
     func send(sid: String, message: String,
-              attachments: [[String: String]] = []) -> AsyncThrowingStream<StreamEvent, Error> {
+              attachments: [[String: String]] = [],
+              effort: String? = nil) -> AsyncThrowingStream<StreamEvent, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
                     var body: [String: Any] = ["sid": sid, "message": message]
                     if !attachments.isEmpty { body["attachments"] = attachments }
+                    if let effort { body["effort"] = effort }       // "xhigh" for retry deeper
                     var req = try request("/api/chat", method: "POST", body: body)
                     req.setValue("text/event-stream", forHTTPHeaderField: "Accept")
                     req.timeoutInterval = 3600
@@ -457,6 +459,7 @@ actor OrbitServer {
         // "approval" event before it never did, so a prompt on the phone could
         // not actually be answered
         case "approval_request":
+            if let full = ApprovalPrompt(p as? [String: Any]) { return .approvalPrompt(full) }
             return .approval(name: str("name"), reason: str("reason"),
                              id: (p as? [String: Any])?["id"] as? String)
         case "approval":       return nil
@@ -466,6 +469,13 @@ actor OrbitServer {
         case "notice":
             let msg = p as? String ?? str("msg")
             return msg.isEmpty ? nil : .notice(msg)
+        // chat actions: a question mid-answer, and an answer that hit its limit
+        case "question":
+            return AskQuestion(p as? [String: Any]).map { .question($0) }
+        case "round_limit":
+            let d = p as? [String: Any]
+            let rounds = (d?["rounds"] as? Int).map { "after \($0) tool rounds" } ?? ""
+            return .roundLimit(str("reason") == "time" ? "stopped at the time limit" : "stopped \(rounds)")
         case "interjection":   return .status("reading your note")
         case "queued":         return .status("waiting for another chat to finish")
         case "dequeued":       return .status("its turn — starting")
