@@ -964,11 +964,13 @@ final class AppState: ObservableObject {
 extension AppState {
     /// Drives the app from environment variables so the whole path — open a
     /// chat, send, stream, save — can be exercised without a human tapping.
+    /// `ORBIT_OPEN_CHAT` is a chat id, `first`, or `new`.
     /// Compiled out of release builds.
     func runDebugScript() async {
         let env = ProcessInfo.processInfo.environment
         guard let want = env["ORBIT_OPEN_CHAT"] else { return }
-        let sid = want == "first" ? chats.first?.id : want
+        // "new" opens a fresh chat — its home page — the way the compose button does
+        let sid = want == "new" ? await newChat() : want == "first" ? chats.first?.id : want
         guard let sid, !sid.isEmpty else { return }
         await open(sid)
         deepLink = sid

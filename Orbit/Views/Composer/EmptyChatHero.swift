@@ -13,7 +13,7 @@ struct EmptyChatHero: View {
     ]
 
     private var recent: [ChatSummary] {
-        Array(state.chats.filter { $0.id != sid && $0.archived != true }.prefix(4))
+        Array(state.chats.filter { $0.id != sid && $0.archived != true }.prefix(5))
     }
 
     var body: some View {
@@ -28,10 +28,11 @@ struct EmptyChatHero: View {
                 default: state.draftPrefill = key
                 }
             }
+            HomeDashboard()
             if !recent.isEmpty {
                 VStack(alignment: .leading, spacing: 0) {
-                    Text("Pick up where you left off")
-                        .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    Text("PICK UP WHERE YOU LEFT OFF")
+                        .font(.caption2.weight(.semibold)).tracking(0.6).foregroundStyle(.secondary)
                         .padding(.horizontal, 12).padding(.bottom, 6)
                     ForEach(recent) { chat in
                         Button {
@@ -54,7 +55,7 @@ struct EmptyChatHero: View {
                 }
                 .padding(.vertical, 8)
                 .background(.quaternary.opacity(0.25), in: .rect(cornerRadius: 12))
-                .frame(maxWidth: 420)
+                .frame(maxWidth: 520)
             }
         }
         .padding(.top, 10)

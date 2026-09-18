@@ -2,18 +2,21 @@
 
 The phone app for [Orbit](https://github.com/Micropeptide/Orbit), the research assistant that lives on your own Mac. Your chats, notes, papers and the model that answers all stay on the Mac; this app is a window onto them — live over Tailscale from anywhere, or over your local network at home.
 
-- **Your conversations, live.** The same chats as on the Mac, streaming as they are written, grouped by day, with pin, archive, rename, bin, and a filter by project. Search titles *and* the text of every message, then jump straight to the line.
-- **Everything a conversation needs.** Markdown with real tables and code blocks, collapsible reasoning, tool calls as they happen, approval prompts mid-answer. Type while an answer is running and send it as a note: the Mac hands it to the model at its next step, and the answer carries on with it in mind. Long-press to copy, quote, edit-and-resend, ask again, or share an answer as text or as an image card. Find inside a chat; `/new`, `/model`, `/compact`, `/find`.
-- **Send what you are looking at.** Photos from the library, a picture from the camera, or any file from the Files app — uploaded to the Mac and sent with your message. Plots and pictures render inline; tap to zoom, save to Photos.
-- **Run the Mac from your pocket.** Pick the model per chat (the local MLX model, the coding CLI you are signed into, or a hosted API — each answer is labelled with the one that wrote it). Start, stop, restart or switch the local model server. See and trigger the Mac's automatic iCloud backup. Restore from the bin.
+- **A home page on every new chat.** What needs you (an approval, a failed scheduled task, an account running low), what is running right now — stop it from there — what is scheduled next, two weeks of activity with your streak, and what is left of each account's 5-hour, weekly and monthly allowance. It keeps itself current while it is on screen.
+- **Your conversations, live.** The same chats as on the Mac, streaming as they are written, grouped by day, with Claude Code, Codex and OpenCode sessions in their own sections. Pin, archive, rename, bin, filter by project. Search titles *and* the text of every message, then jump straight to the line. Scroll up while an answer is being written and it leaves you where you are, with a "New messages" button to come back.
+- **Reads like Claude Code.** Tool calls as `⏺ Read`, `⏺ Bash` lines with a one-line result under them, runs of look-ups folded into "Read 3 files, Searched for 1 pattern", a live status line, collapsible reasoning, tables, code, math and diagrams. Approval prompts and questions from the model are answered from the phone.
+- **A queue, not interruptions.** Send while a chat is answering and the message waits its turn on the Mac, then goes by itself. Reorder, edit, pause or clear the queue — or hold Send to slip a note into the running answer, which the model picks up at its next step. Schedule a message for later; see `/tasks`, scheduled tasks and cluster jobs.
+- **Send what you are looking at.** Photos from the library, a picture from the camera, or any file from the Files app — uploaded to the Mac and sent with your message; `@` mentions a file already there. Plots and pictures render inline; files an answer wrote are cards under it.
+- **Run the Mac from your pocket.** Pick the model per chat — the local MLX model, Claude Code or Codex on any provider, or a hosted API — with what is left of each account and the cheaper hours shown in the picker. Start, stop or switch the local model server. See and trigger the Mac's automatic backup. Restore from the bin.
 - **Works when the Mac is asleep.** Recent conversations are cached for reading offline; a banner says so rather than pretending. An answer that finishes while you are elsewhere notifies you, and the notification opens that chat.
 - **Private by construction.** Pairing is a QR code carrying a token that lands in the Keychain; every request is gated by it. Over Tailscale the connection is HTTPS through Tailscale Serve with a real certificate. Optional Face ID lock. Nothing goes to a cloud unless you configured a hosted model yourself.
 
 <p align="center">
-  <img src="docs/screenshots/chats.png" width="220" alt="Chat list">
-  <img src="docs/screenshots/chat.png" width="220" alt="A conversation with a table">
-  <img src="docs/screenshots/plot.png" width="220" alt="A plot inline">
-  <img src="docs/screenshots/settings.png" width="220" alt="Settings: local model server and backup">
+  <img src="docs/screenshots/home.png" width="190" alt="A new chat's home page: running now, coming up, activity">
+  <img src="docs/screenshots/chats.png" width="190" alt="Chat list">
+  <img src="docs/screenshots/chat.png" width="190" alt="A Claude Code chat with tool calls and a table">
+  <img src="docs/screenshots/plot.png" width="190" alt="A plot inline">
+  <img src="docs/screenshots/settings.png" width="190" alt="Settings: local model server and harness">
 </p>
 
 ## Getting it onto your phone
@@ -54,7 +57,7 @@ xcodegen generate
 open Orbit.xcodeproj
 ```
 
-iOS 17 or later. SwiftUI, no dependencies. The source here mirrors `ios/` in the main [Orbit](https://github.com/Micropeptide/Orbit) repository, which is where development happens; releases are cut from there.
+iOS 17 or later. SwiftUI and Swift Charts, no dependencies. The same source is kept in `ios/` of the main [Orbit](https://github.com/Micropeptide/Orbit) repository, so the Mac side and the phone side of a change travel together.
 
 ## Requirements
 
