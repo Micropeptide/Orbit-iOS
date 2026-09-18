@@ -49,6 +49,13 @@ struct ChatView: View {
     /// again. Only the view: the messages, the chat on the Mac and the cache keep them.
     @State private var cleared: (sid: String, count: Int)?
 
+    /// "Good morning — what's next?", as the Mac greets a new chat.
+    static func greeting(now: Date = .now) -> String {
+        let h = Calendar.current.component(.hour, from: now)
+        let when = h < 5 ? "Up late" : h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening"
+        return "\(when) — what's next?"
+    }
+
     var body: some View {
         // The banner and composer are safe-area insets rather than VStack rows:
         // that keeps the transcript's own inset correct, so text scrolls under
@@ -177,7 +184,8 @@ struct ChatView: View {
             }
             .coordinateSpace(name: "transcript")
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { viewportHeight = $0 }
-            .defaultScrollAnchor(.bottom)          // open at the newest message
+            // open at the newest message; an empty chat opens at its greeting
+            .defaultScrollAnchor(state.messages.isEmpty && !state.streaming ? .top : .bottom)
             .scrollDismissesKeyboard(.interactively)
             .apply { followingNewest($0, proxy: proxy) }
             .onChange(of: actionsModel.jumpRequest) { _, i in
@@ -222,17 +230,14 @@ struct ChatView: View {
                         VStack(spacing: 10) {
                             Image("OrbitMark").resizable().scaledToFit()
                                 .frame(width: 56, height: 56).opacity(0.9)
-                            Text("Ask anything").font(.headline)
-                            Text("It will search the web, read your papers, run Python, "
-                                 + "or query NCBI when it needs to — you don't name the tool.")
-                                .font(.footnote).foregroundStyle(.secondary)
-                                .multilineTextAlignment(.center)
+                            Text(Self.greeting()).font(.title3.weight(.semibold))
                             Text("Answering with \(currentModelName)")
                                 .font(.caption2).foregroundStyle(.tertiary)
                             EmptyChatHero(sid: sid)
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.top, 48).padding(.horizontal, 24)
+                        .id("home")
                     }
                     let rows = transcriptRows
                     // /hidetools: steps that are only finished tool calls are left out of the rows
@@ -353,7 +358,9 @@ struct ChatView: View {
     }
 
     private func scroll(_ proxy: ScrollViewProxy, animated: Bool = true) {
-        let go = { proxy.scrollTo("bottom", anchor: .bottom) }
+        // an empty chat is its home page: start at the greeting, not the bottom of the cards
+        let empty = state.messages.isEmpty && !state.streaming
+        let go = { empty ? proxy.scrollTo("home", anchor: .top) : proxy.scrollTo("bottom", anchor: .bottom) }
         if animated && !reduceMotion { withAnimation(.easeOut(duration: 0.18)) { go() } } else { go() }
     }
 
