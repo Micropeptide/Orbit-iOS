@@ -603,6 +603,7 @@ struct ChatView: View {
                 .accessibilityHint("Scrolls to the newest message")
             }
             TodoDock(sid: sid)
+            GitDock(sid: sid)
             AnswerStatusLine(sid: sid)
             Composer(draft: $draft, typing: $typing, modelName: currentModelName,
                      onPickModel: { showModels = true },

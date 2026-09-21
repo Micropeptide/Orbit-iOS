@@ -157,6 +157,14 @@ extension OrbitServer {
                                ["sid": sid, "tool": tool, "pattern": pattern, "note": note])
     }
 
+    /// Allow a tool in one project, for good: the scope between "for the rest of this
+    /// chat" and "everywhere". The rule lives with that project's folder.
+    func allowInProject(project: String, tool: String, pattern: String, note: String = "") async throws {
+        _ = try await postJSON("/api/permissions/project",
+                               ["kind": "allow", "project": project, "tool": tool,
+                                "pattern": pattern, "note": note])
+    }
+
     /// Set one of the settings a chat keeps for itself (easy mode, the model that
     /// does the side work, how much it may do without asking). `nil` puts the chat
     /// back on Orbit's own setting. Answers with the chat's settings as they now are.
