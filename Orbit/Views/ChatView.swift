@@ -15,6 +15,10 @@ struct ChatView: View {
     /// it off (dragging back up to read); rows changing height never do -- they used to
     /// leave the view parked past the end of a finished answer, which looked blank.
     @State private var following = true
+    /// True while a scroll you started is still in flight, so a layout change cannot be
+    /// mistaken for you scrolling back to the bottom.
+    @State private var userScrolling = false
+    @State private var scrollToken = UUID()
     @State private var viewportHeight: CGFloat = 800
     /// Draw lazily only in very long chats. Decided from the saved messages with a gap between
     /// the two thresholds, so an answer finishing (or streaming) never flips it mid-read --
@@ -57,10 +61,13 @@ struct ChatView: View {
             && (state.openChat?.messages.isEmpty ?? true) && (state.openChat?.n ?? 0) == 0
     }
 
-    /// "Good morning — what's next?", as the Mac greets a new chat.
+    /// "Good morning — what's next?", as the Mac greets a new chat. Six bands, and the
+    /// same words the Mac uses: "Good afternoon" at 17:59 and "Good evening" at 18:00
+    /// is a cliff, and 5am and midnight are not the same kind of late.
     static func greeting(now: Date = .now) -> String {
         let h = Calendar.current.component(.hour, from: now)
-        let when = h < 5 ? "Up late" : h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening"
+        let when = h < 5 ? "Still up" : h < 9 ? "Early start" : h < 12 ? "Good morning"
+                 : h < 18 ? "Good afternoon" : h < 23 ? "Good evening" : "Late one"
         return "\(when) — what's next?"
     }
 
@@ -298,7 +305,13 @@ struct ChatView: View {
                         .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named("transcript")).minY } action: { y in
                             let near = y < viewportHeight + 60
                             if near != atBottom { atBottom = near }
-                            if near { newBelow = false; following = true }
+                            if near { newBelow = false }
+                            // Following again is a decision, and only you make it. An image
+                            // finishing, a tool row opening, a thinking block expanding and the
+                            // todo dock appearing all move this marker into range without your
+                            // touching anything — and the next token then yanked you down
+                            // mid-sentence. Your own drag ending near the bottom says it.
+                            if near && userScrolling { following = true }
                         }
     }
 
@@ -325,9 +338,18 @@ struct ChatView: View {
     private func followingNewest<V: View>(_ content: V, proxy: ScrollViewProxy) -> some View {
         content
     // pulling the list down is you reading back: stop following until you come back down
-    .simultaneousGesture(DragGesture(minimumDistance: 12).onChanged { v in
-        if v.translation.height > 16 { following = false }
-    })
+    .simultaneousGesture(DragGesture(minimumDistance: 12)
+        .onChanged { v in
+            userScrolling = true
+            if v.translation.height > 16 { following = false }
+        }
+        // the flag outlives the gesture a moment: the scroll carries on after your
+        // thumb leaves, and it is still your scroll that lands at the bottom
+        .onEnded { _ in
+            let token = UUID(); scrollToken = token
+            Task { try? await Task.sleep(for: .milliseconds(900))
+                   if scrollToken == token { userScrolling = false } }
+        })
     // the answer's live rows turn into saved rows of another height when it ends, and a
     // reload replaces them again: settle on the newest message once they have laid out
     .onChange(of: state.streaming) { _, on in if !on { settle(proxy) } }
