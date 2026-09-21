@@ -36,6 +36,10 @@ struct ApprovalPrompt: Identifiable, Hashable {
     var suggestions: [String]
     var diff: String?
     var diffPath: String?
+    /// The project this chat belongs to, when it belongs to one: the scope between
+    /// "for this chat" and "everywhere" — "let pytest run here".
+    var projectID: String?
+    var projectName: String?
 
     static func == (a: ApprovalPrompt, b: ApprovalPrompt) -> Bool { a.id == b.id }
     func hash(into h: inout Hasher) { h.combine(id) }
@@ -54,6 +58,9 @@ struct ApprovalPrompt: Identifiable, Hashable {
         let d = obj["diff"] as? [String: Any]
         diff = d?["diff"] as? String
         diffPath = d?["path"] as? String
+        let pr = obj["project"] as? [String: Any]
+        projectID = pr?["id"] as? String
+        projectName = (pr?["name"] as? String) ?? projectID
     }
 }
 

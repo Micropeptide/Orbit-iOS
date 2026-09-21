@@ -217,6 +217,16 @@ struct ChatListView: View {
                     try? await Task.sleep(nanoseconds: 5_000_000_000)
                 }
             }
+            .task {
+                // A chat renamed, binned or started on the Mac shows up here without
+                // pulling to refresh — and asking "has it changed?" costs one small
+                // answer, rather than a page of JSON every ten seconds on cellular.
+                while !Task.isCancelled {
+                    try? await Task.sleep(nanoseconds: 10_000_000_000)
+                    if Task.isCancelled { break }
+                    await state.loadChatsIfChanged()
+                }
+            }
             .onAppear { listModel.refreshSeen() }
             .modifier(ChatListHost(model: listModel))
         }

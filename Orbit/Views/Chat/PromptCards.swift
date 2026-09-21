@@ -216,6 +216,25 @@ struct ApprovalCard: View {
                 }
                 .buttonStyle(.bordered)
                 .font(.callout)
+                // and the size between one chat and everywhere: "let pytest run here"
+                // belongs to the project, and used to be sayable only for every folder
+                if let pid = prompt.projectID, !pid.isEmpty {
+                    Button {
+                        guard !sending else { return }
+                        sending = true
+                        Haptics.press()
+                        Task { await state.allowInProject(prompt); sending = false }
+                    } label: {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("Allow in \(prompt.projectName ?? pid)")
+                            Text(scope == "*" ? "every \(prompt.name) call in this project"
+                                              : "\(prompt.name) matching \(scope), in this project")
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .font(.callout)
+                }
             }
             HStack(spacing: 8) {
                 if prompt.codex {

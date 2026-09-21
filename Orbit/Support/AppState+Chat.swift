@@ -79,6 +79,19 @@ extension AppState {
         await answerApproval(a, ApprovalReply(allow: true))
     }
 
+    /// Allow this in the project this chat belongs to, for good.
+    func allowInProject(_ a: ApprovalPrompt) async {
+        guard let server, let project = a.projectID else { return }
+        do {
+            try await server.allowInProject(project: project, tool: a.name,
+                                            pattern: a.suggestedPattern.isEmpty ? "*" : a.suggestedPattern,
+                                            note: "allowed in \(a.projectName ?? project)")
+        } catch {
+            toast("Couldn't save that for the project — allowing just this one")
+        }
+        await answerApproval(a, ApprovalReply(allow: true))
+    }
+
     func answerApproval(_ a: ApprovalPrompt, _ reply: ApprovalReply) async {
         guard let server else { return }
         do {
