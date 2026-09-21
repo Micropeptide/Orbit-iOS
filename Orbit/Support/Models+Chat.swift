@@ -84,6 +84,12 @@ struct ChatExtras {
     var approval: ApprovalPrompt?
     /// Plan mode for the open chat: it may read and propose, and change nothing.
     var planMode = false
+    /// What the open chat remembers for itself. Empty means it follows Orbit's
+    /// own settings, which is what a chat does until you change something in it.
+    var prefs: [String: JSONValue] = [:]
+    /// Easy mode in the open chat: a small model is offered only the essential
+    /// tools. The Mac resolves it, since a chat that never set one follows Orbit's.
+    var easyMode = false
     /// The temporary chat opened from this phone, if any — the only one burn may erase.
     var tempSid: String?
     /// The answer stopped at its round or time limit; offer to continue.

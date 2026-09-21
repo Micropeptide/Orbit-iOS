@@ -6,6 +6,7 @@ struct WorkBar: View {
     @EnvironmentObject var state: AppState
     let sid: String
     @State private var work: ChatWork?
+    @State private var git: GitState?
     @State private var editing = false
 
     /// Read again when the model changes, a turn lands or an answer starts or ends.
@@ -19,7 +20,8 @@ struct WorkBar: View {
                 Button { editing = true } label: { chip(w) }
                     .buttonStyle(.plain)
                     .accessibilityLabel("\(w.harness.label), \(PathText.place(host: w.host, folder: w.folder)), "
-                                        + "permission mode \(w.mode.label). Tap to change.")
+                                        + "permission mode \(w.mode.label)."
+                                        + (git.map { " git: \($0.short)." } ?? "") + " Tap to change.")
                     .sheet(isPresented: $editing) {
                         WorkSheet(sid: sid, work: w) { await reload() }
                     }
@@ -41,6 +43,12 @@ struct WorkBar: View {
             Image(systemName: w.mode.symbol).font(.caption2)
             Text(w.mode.label).lineLimit(1)
                 .foregroundStyle(w.mode == .bypass ? .orange : .secondary)
+            if let g = git {
+                Text("·").foregroundStyle(.tertiary)
+                Image(systemName: "arrow.trianglehead.branch").font(.caption2)
+                Text(g.short).lineLimit(1)
+                    .foregroundStyle(g.dirty > 0 ? .orange : .secondary)
+            }
             Spacer(minLength: 0)
             Image(systemName: "chevron.down").font(.caption2).foregroundStyle(.tertiary)
         }
@@ -56,6 +64,8 @@ struct WorkBar: View {
     private func reload() async {
         guard let server = state.server else { return }
         if let w = try? await server.chatWork(sid: sid) { work = w }
+        // a folder that is not a repository answers nil, and the chip simply drops it
+        git = try? await server.gitState(sid: sid)
     }
 }
 

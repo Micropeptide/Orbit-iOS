@@ -17,6 +17,7 @@ struct MacGeneralView: View {
             if let error { ErrorRow(message: error) }
             if saved != nil {
                 conversation
+                ownWork
                 quiet
                 background
                 sampling
@@ -63,6 +64,42 @@ struct MacGeneralView: View {
                  + "0 means no limit for rounds, minutes and the reminder. Auto-compact summarises "
                  + "older turns once the context fills past that share (0 = off).")
         }
+    }
+
+    /// Orbit's own work — naming a chat, folding old turns away, reviewing what an
+    /// answer changed, checking it against what was asked. None of it is the answer
+    /// itself, and on a Mac serving one request at a time it must not queue behind
+    /// the answer, so it gets its own model.
+    private var ownWork: some View {
+        let groups = Dictionary(grouping: state.models.filter(\.isReady), by: \.group)
+            .sorted { $0.key.localizedCaseInsensitiveCompare($1.key) == .orderedAscending }
+        return Section {
+            Picker("Side work goes to", selection: string("helper_model", "")) {
+                Text("the model answering this chat").tag("")
+                ForEach(groups, id: \.key) { group, models in
+                    SwiftUI.Section(group) {
+                        ForEach(models) { Text($0.display).tag($0.id) }
+                    }
+                }
+            }
+            Toggle("Review what an answer changed", isOn: word("auto_review", on: "changes"))
+            Toggle("Check the work before finishing", isOn: word("verify_turns", on: "tools"))
+        } header: {
+            Text("Orbit's own work")
+        } footer: {
+            Text("Chat titles, compaction summaries, saved memories, the review and the check. "
+                 + "A model on the Mac answers one request at a time, so asking it to review the "
+                 + "turn it just finished means queueing behind that turn — name a hosted model "
+                 + "here and that work runs while the local one is busy. The review reads the diff "
+                 + "back and says what is wrong with it; the check looks through the transcript for "
+                 + "evidence the work was actually done, and passes it if it cannot run.")
+        }
+    }
+
+    /// A setting the Mac stores as a word rather than a switch ("" off, "changes" on).
+    private func word(_ key: String, on: String) -> Binding<Bool> {
+        Binding(get: { !(value(key)?.string ?? "").isEmpty },
+                set: { set(key, .string($0 ? on : "")) })
     }
 
     private var quiet: some View {

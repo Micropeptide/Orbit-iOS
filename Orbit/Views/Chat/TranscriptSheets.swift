@@ -7,6 +7,8 @@ struct RewindSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var busy = false
     @State private var confirming: (index: Int, files: Bool, text: String)?
+    /// What putting the files back would do, asked for before it is done.
+    @State private var preview: (index: Int, text: String, look: OrbitServer.UndoPreview)?
 
     private struct Point: Identifiable {
         var index: Int          // among your messages, as the Mac counts
@@ -42,9 +44,20 @@ struct RewindSheet: View {
                                 Button("Chat only") { confirming = (p.index, false, p.text) }
                                     .buttonStyle(.bordered)
                                 if p.files > 0 {
-                                    Button("Chat + files") { confirming = (p.index, true, p.text) }
-                                        .buttonStyle(.bordered)
-                                        .tint(.orange)
+                                    // what going back would do to each file, before it does it:
+                                    // a file you edited yourself since is not quietly overwritten
+                                    Button("Chat + files") {
+                                        busy = true
+                                        Task {
+                                            if let look = await state.rewindPreview(toUserIndex: p.index) {
+                                                if look.isEmpty { confirming = (p.index, true, p.text) }
+                                                else { preview = (p.index, p.text, look) }
+                                            }
+                                            busy = false
+                                        }
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .tint(.orange)
                                 }
                             }
                             .font(.caption)
@@ -74,8 +87,75 @@ struct RewindSheet: View {
             } message: {
                 Text("Everything from “\(String(confirming?.text.prefix(60) ?? ""))” on is removed.")
             }
+            .sheet(isPresented: Binding(get: { preview != nil }, set: { if !$0 { preview = nil } })) {
+                if let p = preview { undoPreview(p) }
+            }
         }
         .presentationDetents([.medium, .large])
+    }
+
+    /// The file-by-file account of a "chat + files" rewind. Nothing is restored
+    /// at all while anything is in `unsafe` — that is the Mac's rule, not a
+    /// warning — so the way past it is the explicit second button.
+    private func undoPreview(_ p: (index: Int, text: String, look: OrbitServer.UndoPreview)) -> some View {
+        NavigationStack {
+            List {
+                if !p.look.unsafe.isEmpty {
+                    Section {
+                        ForEach(p.look.unsafe, id: \.path) { r in
+                            row(path: r.path, note: r.why, tint: .orange)
+                        }
+                    } header: {
+                        Text("Changed since that answer wrote them")
+                    } footer: {
+                        Text("Nothing is put back while these are in the way — a half-undone "
+                             + "folder is worse than one that was left alone. Going ahead "
+                             + "overwrites the work you did on them since.")
+                    }
+                }
+                if !p.look.safe.isEmpty {
+                    Section("Would be put back (\(p.look.safe.count))") {
+                        ForEach(p.look.safe, id: \.path) { r in row(path: r.path, note: r.what, tint: .secondary) }
+                    }
+                }
+                if !p.look.gone.isEmpty {
+                    Section {
+                        ForEach(p.look.gone, id: \.path) { r in row(path: r.path, note: r.why, tint: .secondary) }
+                    } header: {
+                        Text("Cannot be put back")
+                    } footer: {
+                        Text("No snapshot was taken — these live outside the workspace.")
+                    }
+                }
+            }
+            .navigationTitle("\(p.look.messages) message\(p.look.messages == 1 ? "" : "s") back")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { preview = nil } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(p.look.unsafe.isEmpty ? "Rewind" : "Overwrite and rewind", role: .destructive) {
+                        busy = true
+                        let force = !p.look.unsafe.isEmpty
+                        preview = nil
+                        Task {
+                            if await state.rewind(toUserIndex: p.index, files: true, force: force) { dismiss() }
+                            busy = false
+                        }
+                    }
+                    .disabled(p.look.safe.isEmpty && p.look.unsafe.isEmpty)
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    private func row(path: String, note: String, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text((path as NSString).lastPathComponent).font(.callout)
+            Text(note.isEmpty ? path : "\(note) · \(path)")
+                .font(.caption2).foregroundStyle(tint)
+                .lineLimit(2).truncationMode(.head)
+        }
     }
 }
 

@@ -150,6 +150,23 @@ extension OrbitServer {
         return (r["plan_mode"] as? Bool) ?? on
     }
 
+    /// Allow a tool for the rest of this chat and not one message longer —
+    /// nothing is written to the saved rules.
+    func allowForThisChat(sid: String, tool: String, pattern: String, note: String = "") async throws {
+        _ = try await postJSON("/api/permissions/session",
+                               ["sid": sid, "tool": tool, "pattern": pattern, "note": note])
+    }
+
+    /// Set one of the settings a chat keeps for itself (easy mode, the model that
+    /// does the side work, how much it may do without asking). `nil` puts the chat
+    /// back on Orbit's own setting. Answers with the chat's settings as they now are.
+    @discardableResult
+    func setChatSetting(sid: String, key: String, value: Any?) async throws -> [String: JSONValue] {
+        let r = try await postJSON("/api/chat/setting", ["sid": sid, "key": key, "value": value ?? NSNull()])
+        guard let prefs = r["prefs"] as? [String: Any] else { return [:] }
+        return prefs.compactMapValues { JSONValue(any: $0) }
+    }
+
     /// A temporary chat: nothing written to disk. Returns its id.
     func temporaryChat(on: Bool = true) async throws -> String {
         let r = try await postJSON("/api/temp", ["on": on])
