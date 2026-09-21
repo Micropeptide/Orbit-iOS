@@ -259,6 +259,7 @@ struct ToolRunDetail: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .frame(maxHeight: 280)
+                .modifier(CodeTextSize())
             }
             HStack {
                 Spacer()
@@ -398,6 +399,7 @@ struct BangBlock: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .frame(maxHeight: 240)
+                .modifier(CodeTextSize())
                     .fixedSize(horizontal: false, vertical: true)
                     Text(run.meta)
                         .font(.caption2.monospacedDigit())

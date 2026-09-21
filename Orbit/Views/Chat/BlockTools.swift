@@ -120,6 +120,7 @@ struct CodeBlock: View {
                     }
                 }
             }
+            .modifier(CodeTextSize())          // code keeps its own size
             .padding(.bottom, collapsible && lineCount > Self.collapseAt ? 4 : 10)
 
             if collapsible && lineCount > Self.collapseAt {
