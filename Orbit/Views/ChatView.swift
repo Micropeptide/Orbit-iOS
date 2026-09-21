@@ -19,6 +19,8 @@ struct ChatView: View {
     /// mistaken for you scrolling back to the bottom.
     @State private var userScrolling = false
     @State private var scrollToken = UUID()
+    /// Where each of your messages sits in the transcript, for the turn rail.
+    @State private var rowTops: [Int: CGFloat] = [:]
     @State private var viewportHeight: CGFloat = 800
     /// Draw lazily only in very long chats. Decided from the saved messages with a gap between
     /// the two thresholds, so an answer finishing (or streaming) never flips it mid-read --
@@ -173,6 +175,22 @@ struct ChatView: View {
 
     private var currentModelName: String { state.currentModelName }
 
+    /// (row index, first words, how tall that turn is) — one entry per message of
+    /// yours, measured from where the next one starts.
+    private var turnAnchors: [(index: Int, text: String, height: CGFloat)] {
+        let rows = transcriptRows
+        var starts: [(Int, String)] = []
+        for r in rows where r.message.isUser && r.message.note != true {
+            starts.append((r.index, r.message.text))
+        }
+        guard starts.count > 3 else { return [] }
+        return starts.enumerated().map { i, s in
+            let top = rowTops[s.0] ?? 0
+            let next = i + 1 < starts.count ? (rowTops[starts[i + 1].0] ?? top + 60) : (rowTops[-1] ?? top + 60)
+            return (index: s.0, text: s.1, height: max(10, next - top))
+        }
+    }
+
     private var transcriptRows: [TranscriptRow] {
         let rows = TranscriptRow.build(state.messages)
         guard let c = cleared, c.sid == sid, c.count <= state.messages.count else { return rows }
@@ -219,6 +237,13 @@ struct ChatView: View {
             .onAppear { scroll(proxy, animated: false) }
             .onDisappear { SeenChats.mark(sid, mtime: state.chats.first { $0.id == sid }?.mtime ?? 0) }
             .modifier(AnswerTextSize())
+            // how long this is and where you are in it — a question the outline, which
+            // lists what you asked, does not answer
+            .overlay(alignment: .trailing) {
+                TurnRail(sid: sid, turns: turnAnchors, live: state.streaming && state.liveSid == sid) { i in
+                    jumpTo = i
+                }
+            }
             // file names in answers are looked up in this chat
             .environment(\.fileLinkSid, sid)
             .task(id: sid) {
@@ -283,6 +308,13 @@ struct ChatView: View {
                             .background(flashed == i ? Color.yellow.opacity(0.18) : .clear,
                                         in: .rect(cornerRadius: 10))
                             .id("row-\(i)")
+                            // where each of your messages starts, so the rail can size
+                            // its bars by how long that turn actually is
+                            .onGeometryChange(for: CGFloat.self) {
+                                $0.frame(in: .named("transcript")).minY
+                            } action: { y in
+                                if m.isUser && m.note != true, rowTops[i] != y { rowTops[i] = y }
+                            }
                     }
                     if state.streaming {
                         // each finished step of the running answer is its own row: packed into one
@@ -302,6 +334,9 @@ struct ChatView: View {
                     // edge counts as being at the newest message (appear/disappear can't tell --
                     // an ordinary stack creates every row up front)
                     Color.clear.frame(height: 8).id("bottom")
+                        .onGeometryChange(for: CGFloat.self) {
+                            $0.frame(in: .named("transcript")).minY
+                        } action: { y in if rowTops[-1] != y { rowTops[-1] = y } }
                         .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named("transcript")).minY } action: { y in
                             let near = y < viewportHeight + 60
                             if near != atBottom { atBottom = near }

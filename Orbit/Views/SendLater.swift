@@ -270,6 +270,10 @@ struct QueueStrip: View {
         }
     }
 
+    /// Which row the drag is over, so the line can be drawn there. "__end__" is the
+    /// strip below the last one, which is the only way to move a message to the end.
+    @State private var dropOn: String?
+
     private var sections: some View {
         VStack(alignment: .leading, spacing: 6) {
             if !queued.isEmpty {
@@ -277,12 +281,45 @@ struct QueueStrip: View {
                 ForEach(Array(queued.enumerated()), id: \.element.id) { i, item in
                     row(item, index: i)
                         .draggable(item.id) { dragPreview(item) }
+                        // A line where it will land. The only feedback was the floating
+                        // preview, which says what is being dragged and not where it is
+                        // going — and on a phone the haptic is the hover.
+                        .overlay(alignment: .top) {
+                            if dropOn == item.id {
+                                Capsule().fill(Color.accentColor).frame(height: 2)
+                                    .padding(.horizontal, 6)
+                            }
+                        }
                         .dropDestination(for: String.self) { ids, _ in
+                            dropOn = nil
                             guard let id = ids.first, id != item.id else { return false }
                             Task { await state.moveQueued(id, before: item.id) }
                             return true
+                        } isTargeted: { over in
+                            if over {
+                                if dropOn != item.id { dropOn = item.id; Haptics.tap() }
+                            } else if dropOn == item.id { dropOn = nil }
                         }
                 }
+                // Dropping past the last row was impossible: every row meant "before
+                // this one", so nothing could be moved to the end.
+                Color.clear.frame(height: 14)
+                    .overlay(alignment: .top) {
+                        if dropOn == "__end__" {
+                            Capsule().fill(Color.accentColor).frame(height: 2)
+                                .padding(.horizontal, 6)
+                        }
+                    }
+                    .dropDestination(for: String.self) { ids, _ in
+                        dropOn = nil
+                        guard let id = ids.first else { return false }
+                        Task { await state.moveQueued(id, before: nil) }
+                        return true
+                    } isTargeted: { over in
+                        if over {
+                            if dropOn != "__end__" { dropOn = "__end__"; Haptics.tap() }
+                        } else if dropOn == "__end__" { dropOn = nil }
+                    }
             }
             if !scheduled.isEmpty {
                 Text("Scheduled · \(scheduled.count)")
