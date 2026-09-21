@@ -63,9 +63,18 @@ struct WorkBar: View {
 
     private func reload() async {
         guard let server = state.server else { return }
-        if let w = try? await server.chatWork(sid: sid) { work = w }
-        // a folder that is not a repository answers nil, and the chip simply drops it
-        git = try? await server.gitState(sid: sid)
+        var w = work
+        if let fresh = try? await server.chatWork(sid: sid) { w = fresh; work = fresh }
+        // only a chat that shows the bar needs the branch, and a cancelled task or one
+        // failed request must not blank a branch that is still there — `work` has always
+        // been kept on failure and `git` was not
+        guard w?.engine == true else { git = nil; return }
+        do {
+            // nil is an answer — not a repository, or a chat that works over SSH
+            git = try await server.gitState(sid: sid)
+        } catch {
+            // a cancelled task or one dropped request keeps the branch that is there
+        }
     }
 }
 

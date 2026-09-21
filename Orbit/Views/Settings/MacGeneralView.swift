@@ -71,17 +71,27 @@ struct MacGeneralView: View {
     /// itself, and on a Mac serving one request at a time it must not queue behind
     /// the answer, so it gets its own model.
     private var ownWork: some View {
-        let groups = Dictionary(grouping: state.models.filter(\.isReady), by: \.group)
+        // A "local-dir:" entry is a model the Mac has the weights for but is not
+        // serving: naming one here saves, says nothing, and quietly sends the side work
+        // back to the chat's own model — which is the thing this setting exists to stop.
+        let usable = state.models.filter { $0.isReady && !$0.id.hasPrefix("local-dir:") }
+        let groups = Dictionary(grouping: usable, by: \.group)
             .sorted { $0.key.localizedCaseInsensitiveCompare($1.key) == .orderedAscending }
+        let chosen = value("helper_model")?.string ?? ""
+        let missing = !chosen.isEmpty && !usable.contains { $0.id == chosen }
         return Section {
             Picker("Side work goes to", selection: string("helper_model", "")) {
                 Text("the model answering this chat").tag("")
+                // a model that is set but not on offer right now still has to be a tag,
+                // or the row renders blank and nothing says what the Mac is really using
+                if missing { Text("\(chosen) — not available right now").tag(chosen) }
                 ForEach(groups, id: \.key) { group, models in
                     SwiftUI.Section(group) {
                         ForEach(models) { Text($0.display).tag($0.id) }
                     }
                 }
             }
+            .task { if state.models.isEmpty { await state.loadModels() } }
             Toggle("Review what an answer changed", isOn: word("auto_review", on: "changes"))
             Toggle("Check the work before finishing", isOn: word("verify_turns", on: "tools"))
         } header: {

@@ -28,7 +28,12 @@ extension OrbitServer {
             }
             safe = rows("safe", "what").map { (path: $0.0, what: $0.1) }
             unsafe = rows("unsafe", "why").map { (path: $0.0, why: $0.1) }
-            gone = rows("gone", "why").map { (path: $0.0, why: $0.1) }
+            // a file the answer created and something has already deleted arrives with
+            // "what" rather than "why", and read by one key alone showed a bare path
+            gone = ((r["gone"] as? [Any]) ?? []).compactMap {
+                guard let d = $0 as? [String: Any], let p = d["path"] as? String else { return nil }
+                return (path: p, why: (d["why"] as? String) ?? (d["what"] as? String) ?? "")
+            }
             messages = (r["messages"] as? Int) ?? 0
         }
     }
@@ -40,12 +45,25 @@ extension OrbitServer {
     /// Put a chat back to just before one of your messages (`index` counts your
     /// messages from 0). With `files`, the file changes later answers made go back too.
     /// `force` restores even files that changed after the answer wrote them.
-    func rewind(sid: String, index: Int, files: Bool, force: Bool = false) async throws -> (dropped: Int, undone: [String]) {
+    /// What a rewind actually did. `lines` is what the Mac had to say, refusals
+    /// included, so counting it was counting refusals as restorations.
+    struct RewindResult {
+        var dropped = 0
+        var restored: [String] = []
+        var refused: [String] = []
+        var lines: [String] = []
+    }
+
+    func rewind(sid: String, index: Int, files: Bool, force: Bool = false) async throws -> RewindResult {
         let r = try await postJSON("/api/rewind", ["sid": sid, "index": index,
                                                    "files": files, "force": force])
-        let dropped = (r["dropped"] as? Int) ?? (r["n"] as? Int) ?? 0
-        let undone = ((r["undone"] as? [Any]) ?? []).map { "\($0)" }
-        return (dropped, undone)
+        func list(_ k: String) -> [String] { ((r[k] as? [Any]) ?? []).map { "\($0)" } }
+        // an older Mac answers with "undone" alone and no account of what it refused
+        let lines = list("undone")
+        return RewindResult(dropped: (r["dropped"] as? Int) ?? (r["n"] as? Int) ?? 0,
+                            restored: r["restored"] == nil ? lines : list("restored"),
+                            refused: list("refused"),
+                            lines: lines)
     }
 
     enum BangOutcome {

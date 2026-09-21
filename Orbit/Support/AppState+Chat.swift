@@ -171,9 +171,15 @@ extension AppState {
     func setChatSetting(_ key: String, _ value: Any?, saying: String? = nil) async {
         guard let server, let sid = openChat?.sid else { return }
         do {
-            chatExtras.prefs = try await server.setChatSetting(sid: sid, key: key, value: value)
-            openChat?.prefs = chatExtras.prefs
-            if key == "easy_mode" { chatExtras.easyMode = (value as? Bool) ?? chatExtras.easyMode }
+            let r = try await server.setChatSetting(sid: sid, key: key, value: value)
+            // you may have opened another chat while it answered: this describes the
+            // chat it was sent about, and belongs nowhere else
+            guard openChat?.sid == sid else { return }
+            chatExtras.prefs = r.prefs
+            openChat?.prefs = r.prefs
+            // what the Mac resolved it to, not what was sent: nil means "follow Orbit's
+            // own setting again", which the value sent cannot express
+            if key == "easy_mode" { chatExtras.easyMode = r.effective?.bool ?? chatExtras.easyMode }
             if let saying { toast(saying) }
         } catch { lastError = error.localizedDescription }
     }

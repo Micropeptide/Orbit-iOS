@@ -328,7 +328,16 @@ final class AppState: ObservableObject {
             // leave the old answer running on the Mac; just stop watching it here
             detachLive()
         }
-        if openChat?.sid != id { queue = .empty }
+        if openChat?.sid != id {
+            queue = .empty
+            // These describe one chat, and only a *successful* load used to replace
+            // them: opening a chat from the cache, or when the Mac is briefly out of
+            // reach, left the last chat's plan mode and easy mode on screen — and
+            // tapping the menu then wrote that answer onto a chat that never set it.
+            chatExtras.planMode = false
+            chatExtras.prefs = [:]
+            chatExtras.easyMode = false
+        }
         markSeen(id)
         // show the cached copy immediately; the network fills it in
         if let cached = Cache.loadMessages(id), !cached.isEmpty {

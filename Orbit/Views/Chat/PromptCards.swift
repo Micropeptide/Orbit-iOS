@@ -197,13 +197,22 @@ struct ApprovalCard: View {
             // writes a rule that outlives the chat. Most of the time what you mean
             // is "for the next few minutes", so that grant gets its own button.
             if !prompt.claude && !prompt.codex {
-                Button("Allow for the rest of this chat" + (prompt.suggestedPattern.isEmpty
-                                                            || prompt.suggestedPattern == "*"
-                                                            ? "" : " (\(prompt.suggestedPattern))")) {
+                // The pattern is the scope, and "*" means the whole tool — which was
+                // the one grant shown with no scope written on it at all, while the
+                // narrower "always allow" put its pattern in an editable field first.
+                let scope = prompt.suggestedPattern.isEmpty ? "*" : prompt.suggestedPattern
+                Button {
                     guard !sending else { return }
                     sending = true
                     Haptics.press()
                     Task { await state.allowForThisChat(prompt); sending = false }
+                } label: {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Allow for the rest of this chat")
+                        Text(scope == "*" ? "every \(prompt.name) call in this chat"
+                                          : "\(prompt.name) matching \(scope)")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
                 }
                 .buttonStyle(.bordered)
                 .font(.callout)
