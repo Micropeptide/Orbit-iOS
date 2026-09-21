@@ -21,7 +21,12 @@ struct ChatView: View {
     @State private var scrollToken = UUID()
     /// How tall each transcript row is, for the turn rail's bars.
     @State private var rowHeights: [Int: CGFloat] = [:]
-    @State private var viewportHeight: CGFloat = 800
+    /// How tall the scroll view is. Read only from the marker's own report, never from
+    /// the body -- so it is held in a box rather than in @State: a measurement that
+    /// invalidated the view rebuilt a transcript of several thousand rows, and the rebuild
+    /// changed the height again. SwiftUI called that what it was ("Geometry action is
+    /// cycling between duplicate values") and cut the layout pass short.
+    @State private var viewport = Viewport()
     /// Draw lazily only in very long chats. Decided from the saved messages with a gap between
     /// the two thresholds, so an answer finishing (or streaming) never flips it mid-read --
     /// flipping rebuilt the whole transcript.
@@ -216,7 +221,7 @@ struct ChatView: View {
                 .padding(.top, 14)
             }
             .coordinateSpace(name: "transcript")
-            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { viewportHeight = $0 }
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { viewport.height = $0 }
             // open at the newest message; an empty chat opens at its greeting
             .defaultScrollAnchor(isHome ? .top : .bottom)
             .scrollDismissesKeyboard(.interactively)
@@ -336,18 +341,38 @@ struct ChatView: View {
                     // where the end of the chat is on screen: within a short reach of the bottom
                     // edge counts as being at the newest message (appear/disappear can't tell --
                     // an ordinary stack creates every row up front)
+                    // An empty chat is its home page: there is no newest message to be away
+                    // from, so there is nothing to measure. It is not merely pointless there
+                    // -- the greeting's cards arrive after the first layout and move this
+                    // marker 200pt while nothing else moves, and SwiftUI cuts the layout pass
+                    // short over it ("Geometry action is cycling between duplicate values").
+                    // The watch is on the measurement itself, so not measuring is the answer;
+                    // a test inside the action would come too late.
                     Color.clear.frame(height: 8).id("bottom")
-                        .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named("transcript")).minY } action: { y in
-                            let near = y < viewportHeight + 60
-                            if near != atBottom { atBottom = near }
-                            if near { newBelow = false }
-                            // Following again is a decision, and only you make it. An image
-                            // finishing, a tool row opening, a thinking block expanding and the
-                            // todo dock appearing all move this marker into range without your
-                            // touching anything — and the next token then yanked you down
-                            // mid-sentence. Your own drag ending near the bottom says it.
-                            if near && userScrolling { following = true }
+                        .apply { marker in
+                            if isHome { marker } else { marker.watchingTheEnd(watch) }
                         }
+    }
+
+    /// Where the end of the chat is on screen, given the marker's distance down the
+    /// transcript. Within a short reach of the bottom edge counts as being at the newest
+    /// message -- appear/disappear can't tell us, because an ordinary stack creates every
+    /// row up front.
+    private func watch(_ y: CGFloat) {
+        // Arriving needs less room than leaving. The "Latest" pill this answer shows sits
+        // in the column with the box: showing it takes ~40pt from the scroll view and moves
+        // this very marker, which then said you were at the bottom after all and hid the
+        // pill again. SwiftUI caught the loop ("Geometry action is cycling between duplicate
+        // values") and settled on whichever side it happened to reach, leaving the pill
+        // stuck. A band wider than the pill means its own height can never flip the answer.
+        let near = y < viewport.height + (atBottom ? 160 : 60)
+        if near != atBottom { atBottom = near }
+        if near { newBelow = false }
+        // Following again is a decision, and only you make it. An image finishing, a tool
+        // row opening, a thinking block expanding and the todo dock appearing all move this
+        // marker into range without your touching anything — and the next token then yanked
+        // you down mid-sentence. Your own drag ending near the bottom says it.
+        if near && userScrolling { following = true }
     }
 
     /// Shown in the transcript where the answer would have been, because that
@@ -678,7 +703,19 @@ struct TranscriptPage: View {
     }
 }
 
+/// A measurement the body never reads. A plain class, so writing to it does not
+/// invalidate the view that measured it.
+private final class Viewport { var height: CGFloat = 800 }
+
 extension View {
     /// Hands the view to a function mid-chain, so a long chain can be split up.
     func apply<V: View>(@ViewBuilder _ transform: (Self) -> V) -> V { transform(self) }
+
+    /// Reports how far down the transcript this marker sits, so the chat can tell whether
+    /// the newest message is on screen. Attached only where the question means something:
+    /// SwiftUI watches the measurement, not what is done with it.
+    func watchingTheEnd(_ report: @escaping (CGFloat) -> Void) -> some View {
+        onGeometryChange(for: CGFloat.self) { $0.frame(in: .named("transcript")).minY }
+            action: { report($0) }
+    }
 }

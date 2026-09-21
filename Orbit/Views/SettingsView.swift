@@ -170,6 +170,7 @@ struct SettingsView: View {
             }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
+            .debugSettingsDestination()
             .task { await state.refreshServer(); await state.refreshBackup(); await state.refreshAutonomy() }
             .refreshable {
                 await state.refreshEverything(); await state.refreshServer()
