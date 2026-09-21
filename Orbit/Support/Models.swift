@@ -146,6 +146,12 @@ struct ChatDetail: Codable {
     var running: Bool?
     var context: ContextState?
     var plan_mode: Bool?
+    /// The settings this chat keeps for itself, overriding Orbit's own: easy mode,
+    /// which model does the side work, how much it may do without asking.
+    var prefs: [String: JSONValue]?
+    /// Easy mode as it applies to this chat — the chat's own if it set one, and
+    /// otherwise Orbit's, resolved on the Mac so the phone need not hold both.
+    var easy_mode: Bool?
 }
 
 struct ContextState: Codable, Hashable {

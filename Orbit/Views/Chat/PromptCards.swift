@@ -193,6 +193,21 @@ struct ApprovalCard: View {
                 Button("Deny", role: .destructive) { reply(ApprovalReply(allow: false)) }
                     .buttonStyle(.bordered)
             }
+            // "Always allow" used to be the only way to stop being asked, and it
+            // writes a rule that outlives the chat. Most of the time what you mean
+            // is "for the next few minutes", so that grant gets its own button.
+            if !prompt.claude && !prompt.codex {
+                Button("Allow for the rest of this chat" + (prompt.suggestedPattern.isEmpty
+                                                            || prompt.suggestedPattern == "*"
+                                                            ? "" : " (\(prompt.suggestedPattern))")) {
+                    guard !sending else { return }
+                    sending = true
+                    Haptics.press()
+                    Task { await state.allowForThisChat(prompt); sending = false }
+                }
+                .buttonStyle(.bordered)
+                .font(.callout)
+            }
             HStack(spacing: 8) {
                 if prompt.codex {
                     Button("Allow for this session") { reply(ApprovalReply(allow: true, always: true)) }

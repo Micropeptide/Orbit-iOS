@@ -343,6 +343,8 @@ final class AppState: ObservableObject {
             if streaming, let live = liveSid, live != id { detachLive() }
             openChat = d
             chatExtras.planMode = d.plan_mode ?? false
+            chatExtras.prefs = d.prefs ?? [:]
+            chatExtras.easyMode = d.easy_mode ?? false
             var fresh = d.messages
             // Mid-answer the Mac may not have written the question yet (it starts
             // the model server first). Keep the one we showed rather than losing it.

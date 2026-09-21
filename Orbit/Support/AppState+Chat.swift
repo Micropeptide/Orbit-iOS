@@ -64,6 +64,21 @@ extension AppState {
         }
     }
 
+    /// Allow this call, and the ones like it, until this chat ends. Orbit's own
+    /// agent only: Claude Code and Codex keep their own permissions.
+    func allowForThisChat(_ a: ApprovalPrompt) async {
+        guard let server, let sid = openChat?.sid else { return }
+        do {
+            try await server.allowForThisChat(sid: sid, tool: a.name,
+                                              pattern: a.suggestedPattern.isEmpty ? "*" : a.suggestedPattern,
+                                              note: "allowed from the phone")
+        } catch {
+            // the rule did not stick; this one call is still the user's decision
+            toast("Couldn't hold that for the chat — allowing just this one")
+        }
+        await answerApproval(a, ApprovalReply(allow: true))
+    }
+
     func answerApproval(_ a: ApprovalPrompt, _ reply: ApprovalReply) async {
         guard let server else { return }
         do {
@@ -148,6 +163,18 @@ extension AppState {
             openChat?.plan_mode = chatExtras.planMode
             toast(chatExtras.planMode ? "Plan mode: it reads and proposes, and changes nothing"
                                       : "Plan mode off: it may make changes")
+        } catch { lastError = error.localizedDescription }
+    }
+
+    /// Change a setting for the open chat alone. Passing nil puts it back on
+    /// Orbit's own setting, which is where a chat starts.
+    func setChatSetting(_ key: String, _ value: Any?, saying: String? = nil) async {
+        guard let server, let sid = openChat?.sid else { return }
+        do {
+            chatExtras.prefs = try await server.setChatSetting(sid: sid, key: key, value: value)
+            openChat?.prefs = chatExtras.prefs
+            if key == "easy_mode" { chatExtras.easyMode = (value as? Bool) ?? chatExtras.easyMode }
+            if let saying { toast(saying) }
         } catch { lastError = error.localizedDescription }
     }
 
