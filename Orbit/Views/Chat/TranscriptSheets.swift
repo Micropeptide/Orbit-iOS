@@ -52,6 +52,11 @@ struct RewindSheet: View {
                                             if let look = await state.rewindPreview(toUserIndex: p.index) {
                                                 if look.isEmpty { confirming = (p.index, true, p.text) }
                                                 else { preview = (p.index, p.text, look) }
+                                            } else {
+                                                // an older Mac has no preview to give, and a
+                                                // failure here left a button that did nothing
+                                                // at all with the reason hidden behind the sheet
+                                                confirming = (p.index, true, p.text)
                                             }
                                             busy = false
                                         }
@@ -79,7 +84,7 @@ struct RewindSheet: View {
                     guard let c = confirming else { return }
                     busy = true
                     Task {
-                        if await state.rewind(toUserIndex: c.index, files: c.files) { dismiss() }
+                        if await state.rewind(toUserIndex: c.index, files: c.files) != nil { dismiss() }
                         busy = false
                     }
                 }
@@ -100,9 +105,11 @@ struct RewindSheet: View {
     private func undoPreview(_ p: (index: Int, text: String, look: OrbitServer.UndoPreview)) -> some View {
         NavigationStack {
             List {
+                // the Mac lists one row per write, so a file edited twice appears twice:
+                // the counts are of rows, and the rows are what will actually happen
                 if !p.look.unsafe.isEmpty {
                     Section {
-                        ForEach(p.look.unsafe, id: \.path) { r in
+                        ForEach(Array(p.look.unsafe.enumerated()), id: \.offset) { _, r in
                             row(path: r.path, note: r.why, tint: .orange)
                         }
                     } header: {
@@ -115,12 +122,14 @@ struct RewindSheet: View {
                 }
                 if !p.look.safe.isEmpty {
                     Section("Would be put back (\(p.look.safe.count))") {
-                        ForEach(p.look.safe, id: \.path) { r in row(path: r.path, note: r.what, tint: .secondary) }
+                        ForEach(Array(p.look.safe.enumerated()), id: \.offset) { _, r in
+                            row(path: r.path, note: r.what, tint: .secondary) }
                     }
                 }
                 if !p.look.gone.isEmpty {
                     Section {
-                        ForEach(p.look.gone, id: \.path) { r in row(path: r.path, note: r.why, tint: .secondary) }
+                        ForEach(Array(p.look.gone.enumerated()), id: \.offset) { _, r in
+                            row(path: r.path, note: r.why, tint: .secondary) }
                     } header: {
                         Text("Cannot be put back")
                     } footer: {
@@ -138,7 +147,7 @@ struct RewindSheet: View {
                         let force = !p.look.unsafe.isEmpty
                         preview = nil
                         Task {
-                            if await state.rewind(toUserIndex: p.index, files: true, force: force) { dismiss() }
+                            if await state.rewind(toUserIndex: p.index, files: true, force: force) != nil { dismiss() }
                             busy = false
                         }
                     }

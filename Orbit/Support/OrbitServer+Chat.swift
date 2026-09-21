@@ -161,10 +161,12 @@ extension OrbitServer {
     /// does the side work, how much it may do without asking). `nil` puts the chat
     /// back on Orbit's own setting. Answers with the chat's settings as they now are.
     @discardableResult
-    func setChatSetting(sid: String, key: String, value: Any?) async throws -> [String: JSONValue] {
+    func setChatSetting(sid: String, key: String, value: Any?)
+        async throws -> (prefs: [String: JSONValue], effective: JSONValue?) {
         let r = try await postJSON("/api/chat/setting", ["sid": sid, "key": key, "value": value ?? NSNull()])
-        guard let prefs = r["prefs"] as? [String: Any] else { return [:] }
-        return prefs.compactMapValues { JSONValue(any: $0) }
+        if let e = r["error"] as? String, !e.isEmpty { throw Failure.server(400, e) }
+        let prefs = (r["prefs"] as? [String: Any]) ?? [:]
+        return (prefs.compactMapValues { JSONValue(any: $0) }, JSONValue(any: r["effective"]))
     }
 
     /// A temporary chat: nothing written to disk. Returns its id.

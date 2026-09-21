@@ -63,10 +63,13 @@ enum JSONValue: Codable, Hashable, Sendable {
     init?(any: Any?) {
         switch any {
         case nil, is NSNull: self = .null
-        case let b as Bool: self = .bool(b)
         case let n as NSNumber:
-            // NSNumber carries booleans too, and `is Bool` above catches those first
-            self = .number(n.doubleValue)
+            // `case let b as Bool` looks like the right first case and is not: an
+            // NSNumber holding 0 or 1 bridges to Bool, so the integers 0 and 1 became
+            // false and true. Only CFBoolean is really a boolean.
+            if CFGetTypeID(n) == CFBooleanGetTypeID() { self = .bool(n.boolValue) }
+            else { self = .number(n.doubleValue) }
+        case let b as Bool: self = .bool(b)
         case let s as String: self = .string(s)
         case let a as [Any]: self = .array(a.compactMap { JSONValue(any: $0) })
         case let o as [String: Any]: self = .object(o.compactMapValues { JSONValue(any: $0) })
