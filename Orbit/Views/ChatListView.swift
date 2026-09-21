@@ -82,8 +82,19 @@ struct ChatListView: View {
                     }
                     FileSearchSection(query: search, preview: $filePreview)
                     ForEach(dayGroups, id: \.0) { day, chats in
-                     Section(day) {
+                     Section {
                       ForEach(chats) { chat in listRow(chat) }
+                     } header: {
+                      // the header floats while its rows scroll (plain list style), so it
+                      // may as well say how many are under it
+                      HStack(spacing: 6) {
+                       Text(day)
+                       Text("\(chats.count)")
+                        .font(.caption2.monospacedDigit())
+                        .padding(.horizontal, 6).padding(.vertical, 1)
+                        .background(.quaternary.opacity(0.5), in: .capsule)
+                       Spacer(minLength: 0)
+                      }
                      }
                     }
                     if shown.isEmpty { empty }

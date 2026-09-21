@@ -324,16 +324,24 @@ struct QueueStrip: View {
     /// One waiting message. `index` is its place in line; nil for a scheduled one.
     private func row(_ item: QueueItem, index: Int?) -> some View {
         HStack(alignment: .top, spacing: 9) {
+            // A number says where in line, which is not the same as what this is. The
+            // one that goes next, the ones waiting behind it and the ones with a time of
+            // their own each say so; the place in line moves to the accessibility label.
             Group {
                 if let index {
-                    Text("\(index + 1)").font(.caption.monospacedDigit().weight(.semibold))
+                    Image(systemName: index == 0 ? "arrowtriangle.right.fill" : "circle")
+                        .font(index == 0 ? .caption2 : .system(size: 7))
                 } else {
                     Image(systemName: item.missed ? "clock.badge.exclamationmark" : "clock").font(.caption)
                 }
             }
-            .foregroundStyle(item.missed ? .orange : .secondary)
+            .foregroundStyle(item.missed ? .orange
+                             : index == 0 ? Color.accentColor : .secondary)
             .frame(width: 16)
             .padding(.top, 2)
+            .accessibilityLabel(item.missed ? "missed"
+                                : index == 0 ? "next to send"
+                                : index.map { "waiting, number \($0 + 1)" } ?? "scheduled")
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.text.isEmpty ? "(attachments only)" : item.text)
                     .font(.footnote).lineLimit(2)

@@ -109,7 +109,24 @@ struct TodoDock: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityHint(open ? "Hides the plan" : "Shows the whole plan")
-                if open { TodoList(steps: steps) }
+                // A twenty-step plan is taller than the screen, and with the keyboard up
+                // it pushed the message box — and the answer — out of sight entirely.
+                // The header stays put and only the list scrolls.
+                if open {
+                    ScrollViewReader { sp in
+                        ScrollView {
+                            TodoList(steps: steps)
+                                .id("todos")
+                        }
+                        .frame(maxHeight: min(CGFloat(steps.count) * 26 + 8, 200))
+                        .scrollBounceBehavior(.basedOnSize)
+                        .onAppear {
+                            if let i = steps.firstIndex(where: { $0.active && !$0.done }) {
+                                sp.scrollTo("todo-\(i)", anchor: .center)
+                            }
+                        }
+                    }
+                }
             }
             .padding(.horizontal, 14).padding(.vertical, 7)
             .frame(maxWidth: .infinity, alignment: .leading)
