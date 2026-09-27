@@ -144,6 +144,12 @@ extension Message {
         return changes ?? []
     }
 
+    /// Undone, and still able to be put back as the answer left them.
+    var redoableChanges: [String] {
+        guard changes_undone == true, can_redo == true, t != nil else { return [] }
+        return changes ?? []
+    }
+
     static func duration(_ s: Double) -> String {
         if s < 60 { return String(format: "%.1f s", s) }
         let m = Int(s) / 60, r = Int(s) % 60

@@ -148,13 +148,14 @@ struct GitDock: View {
     @AppStorage("orbit.gitDockOpen") private var open = false
     @State private var git: GitState?
     @State private var at = Date.distantPast
+    @State private var shown: (path: String, diff: String)?
 
     /// Read again when a turn lands or an answer starts or ends — not on every token.
     private var key: String { "\(sid)|\(state.messages.count)|\(state.streaming)" }
 
     var body: some View {
         Group {
-            if let g = git, g.dirty > 0 || g.ahead > 0 || g.behind > 0 {
+            if let g = git, g.dirty > 0 || g.ahead > 0 || g.behind > 0 || g.op != nil {
                 VStack(alignment: .leading, spacing: 5) {
                     Button {
                         withAnimation(.easeInOut(duration: 0.15)) { open.toggle() }
@@ -176,14 +177,46 @@ struct GitDock: View {
                             if !g.diff.isEmpty { Text(g.diff) }
                             if g.untracked > 0 { Text("\(g.untracked) untracked") }
                             if !g.last.isEmpty { Text("last: " + g.last).lineLimit(2) }
+                            // each changed file; a tap shows its diff
+                            ScrollView {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    ForEach(g.files.prefix(40)) { f in
+                                        Button { Task { await show(f.path) } } label: {
+                                            HStack(spacing: 6) {
+                                                Text(f.status == "?" ? "new" : f.status == "U" ? "conflict" : f.status)
+                                                    .font(.caption2.monospaced())
+                                                    .foregroundStyle(f.status == "U" ? .red : f.status == "?" || f.status == "A" ? .green : .secondary)
+                                                    .frame(minWidth: 30, alignment: .leading)
+                                                Text(f.path).lineLimit(1).truncationMode(.middle)
+                                                if let a = f.added {
+                                                    Text("+\(a) −\(f.removed ?? 0)").font(.caption2.monospacedDigit())
+                                                        .foregroundStyle(.secondary)
+                                                }
+                                            }
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                }
+                            }
+                            .frame(maxHeight: 140)
                         }
                         .font(.caption2).foregroundStyle(.secondary)
-                        .frame(maxHeight: 96, alignment: .top)
+                        .frame(maxHeight: 220, alignment: .top)
                     }
                 }
                 .padding(.horizontal, 14).padding(.vertical, 6)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .overlay(Divider(), alignment: .top)
+            }
+        }
+        .sheet(isPresented: Binding(get: { shown != nil }, set: { if !$0 { shown = nil } })) {
+            if let s = shown {
+                NavigationStack {
+                    ScrollView { DiffView(diff: s.diff, path: s.path).padding() }
+                        .navigationTitle((s.path as NSString).lastPathComponent)
+                        .navigationBarTitleDisplayMode(.inline)
+                        .toolbar { Button("Done") { shown = nil } }
+                }
             }
         }
         .task(id: key) {
@@ -200,6 +233,18 @@ struct GitDock: View {
                 // cancelled, or one dropped request: keep what is on screen and let the
                 // next key change try again straight away
             }
+        }
+    }
+}
+
+extension GitDock {
+    fileprivate func show(_ path: String) async {
+        guard let server = state.server else { return }
+        do {
+            let d = try await server.gitDiff(sid: sid, path: path)
+            shown = (path, d.isEmpty ? "No changes to show (a binary file, or it matches the last commit)." : d)
+        } catch {
+            state.toast("Couldn't read that diff: " + error.localizedDescription)
         }
     }
 }

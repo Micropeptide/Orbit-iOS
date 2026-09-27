@@ -92,7 +92,13 @@ struct MacGeneralView: View {
                 }
             }
             .task { if state.models.isEmpty { await state.loadModels() } }
-            Toggle("Review what an answer changed", isOn: word("auto_review", on: "changes"))
+            Picker("Review what an answer changed", selection: Binding(
+                get: { let v = value("auto_review")?.string ?? ""; return ["changes", "fix"].contains(v) ? v : "" },
+                set: { set("auto_review", .string($0)) })) {
+                Text("Off").tag("")
+                Text("Report").tag("changes")
+                Text("Report and fix").tag("fix")
+            }
             Toggle("Check the work before finishing", isOn: word("verify_turns", on: "tools"))
         } header: {
             Text("Orbit's own work")
@@ -101,7 +107,8 @@ struct MacGeneralView: View {
                  + "A model on the Mac answers one request at a time, so asking it to review the "
                  + "turn it just finished means queueing behind that turn — name a hosted model "
                  + "here and that work runs while the local one is busy. The review reads the diff "
-                 + "back and says what is wrong with it; the check looks through the transcript for "
+                 + "back and says what is wrong with it (and with \"Report and fix\", the chat answers it, up to "
+                 + "twice); the check looks through the transcript for "
                  + "evidence the work was actually done, and passes it if it cannot run.")
         }
     }

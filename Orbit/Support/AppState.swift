@@ -28,6 +28,11 @@ final class AppState: ObservableObject {
     /// What a brand-new chat answers with, set on the Mac.
     @Published var defaultModel: String?
     @Published var runningChats: Set<String> = []
+    /// When each answering chat started, so the list can count the time as it runs.
+    @Published var runningSince: [String: Double] = [:]
+    /// The open chat's goal (Goal.swift), and whether its editor is showing.
+    @Published var goal: Goal?
+    @Published var showGoalEditor = false
     /// Set to push a conversation onto the stack — used by deep links today and
     /// by notification taps later.
     @Published var deepLink: String?
@@ -374,6 +379,7 @@ final class AppState: ObservableObject {
             chatExtras.planMode = false
             chatExtras.prefs = [:]
             chatExtras.easyMode = false
+            goal = nil
         }
         markSeen(id)
         // show the cached copy immediately; the network fills it in
@@ -391,6 +397,7 @@ final class AppState: ObservableObject {
             chatExtras.planMode = d.plan_mode ?? false
             chatExtras.prefs = d.prefs ?? [:]
             chatExtras.easyMode = d.easy_mode ?? false
+            goal = d.goal
             var fresh = d.messages
             // Mid-answer the Mac may not have written the question yet (it starts
             // the model server first). Keep the one we showed rather than losing it.
@@ -458,7 +465,7 @@ final class AppState: ObservableObject {
 
     // ------------------------------------------------------------ sending
 
-    func send(_ text: String, effort: String? = nil) async {
+    func send(_ text: String, effort: String? = nil, goal asGoal: Bool = false) async {
         guard let server, let sid = openChat?.sid,
               !(text.isEmpty && attachments.isEmpty) else { return }
         let going = attachments
@@ -476,7 +483,7 @@ final class AppState: ObservableObject {
             do {
                 for try await ev in await server.send(sid: sid, message: text,
                                                       attachments: going.map(\.payload),
-                                                      effort: effort) {
+                                                      effort: effort, goal: asGoal) {
                     if Task.isCancelled { break }
                     // a chat you have since left keeps generating on the Mac;
                     // its tokens must not land in the one you are looking at
@@ -499,6 +506,8 @@ final class AppState: ObservableObject {
             else if liveSid == sid {
                 let failed = lastError != nil
                 finishLive(sid: sid)
+                if asGoal { await refreshGoal(sid) }
+                followGoal(sid)
                 // whether the Mac kept the message is its call; ask rather than guess
                 if failed { await open(sid) }
             }
@@ -756,7 +765,10 @@ final class AppState: ObservableObject {
         c.title = title
         c.body = Self.lockScreen(String(body.prefix(240)))
         c.sound = .default
-        if let sid { c.userInfo = ["sid": sid] }     // tapping it opens that chat
+        if let sid {
+            c.userInfo = ["sid": sid]                // tapping it opens that chat,
+            c.categoryIdentifier = Notifications.answerCategory   // and Reply answers it
+        }
         UNUserNotificationCenter.current().add(
             UNNotificationRequest(identifier: UUID().uuidString, content: c, trigger: nil))
     }

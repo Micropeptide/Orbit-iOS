@@ -79,7 +79,8 @@ struct SplitChats: View {
                 }
                 Text("\(chat.n) messages").font(.caption2)
                     .foregroundStyle(.secondary)
-                ChatStatusBadge(status: state.status(of: chat, seen: listModel.seen))
+                ChatStatusBadge(status: state.status(of: chat, seen: listModel.seen),
+                                since: state.runningSince[chat.id], goal: chat.goal)
             }
         }
         .contextMenu { ChatRowMenu(chat: chat, model: listModel) }
