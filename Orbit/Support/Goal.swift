@@ -1,4 +1,5 @@
 import Foundation
+import UserNotifications
 
 /// What a chat keeps working toward across answers. The Mac drives it: after each
 /// answer it checks the work against the objective and carries on, or stops and says
@@ -13,9 +14,24 @@ struct Goal: Codable, Hashable {
     var turns_used: Int
     var reason: String
     var note: String
+    /// What each check said, and each stop and start, oldest first.
+    var history: [Entry]
+
+    struct Entry: Codable, Hashable {
+        var t: Double
+        var verdict: String
+        var reason: String
+        init(from d: Decoder) throws {
+            let c = try d.container(keyedBy: CodingKeys.self)
+            t = c.lenientDouble(.t) ?? 0
+            verdict = c.lenientString(.verdict) ?? ""
+            reason = c.lenientString(.reason) ?? ""
+        }
+        enum CodingKeys: String, CodingKey { case t, verdict, reason }
+    }
 
     enum CodingKeys: String, CodingKey {
-        case objective, status, token_budget, tokens_used, max_turns, turns_used, reason, note
+        case objective, status, token_budget, tokens_used, max_turns, turns_used, reason, note, history
     }
 
     init(from d: Decoder) throws {
@@ -28,6 +44,7 @@ struct Goal: Codable, Hashable {
         turns_used = Int(c.lenientDouble(.turns_used) ?? 0)
         reason = c.lenientString(.reason) ?? ""
         note = c.lenientString(.note) ?? ""
+        history = (try? c.decode([Entry].self, forKey: .history)) ?? []
     }
 
     init?(_ d: [String: Any]?) {
@@ -61,6 +78,39 @@ struct Goal: Codable, Hashable {
     var overBudget: Bool { token_budget > 0 && tokens_used >= token_budget }
 }
 
+/// An answer left work undone: the Mac offers to keep going until it is done, and takes
+/// the offer on its own when `deadline` passes unless you answer.
+struct GoalOffer: Hashable, Codable {
+    var id: String
+    var objective: String
+    var why: String
+    var deadline: Date?
+
+    enum CodingKeys: String, CodingKey { case id, objective, why, remaining }
+
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        objective = c.lenientString(.objective) ?? ""
+        why = c.lenientString(.why) ?? ""
+        deadline = c.lenientDouble(.remaining).map { Date().addingTimeInterval($0) }
+    }
+
+    func encode(to e: Encoder) throws {
+        var c = e.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id); try c.encode(objective, forKey: .objective); try c.encode(why, forKey: .why)
+    }
+
+    init?(_ d: [String: Any]?) {
+        guard let d, let id = d["id"] as? String else { return nil }
+        self.id = id
+        objective = (d["objective"] as? String) ?? ""
+        why = (d["why"] as? String) ?? ""
+        let left = (d["remaining"] as? Double) ?? (d["remaining"] as? Int).map(Double.init)
+        deadline = left.map { Date().addingTimeInterval($0) }
+    }
+}
+
 extension OrbitServer {
     /// `/api/goal`: get | set | edit | pause | resume | clear. Returns the goal as it now
     /// stands, and whether a resume started the next answer.
@@ -83,16 +133,57 @@ extension AppState {
     }
 
     /// After an answer in a chat with an active goal the Mac checks the work, which
-    /// takes a few seconds; ask then, and again a little later.
+    /// takes a few seconds and can end in a verdict that changes nothing else on screen:
+    /// keep asking until it settles, or the next answer it starts takes over.
     func followGoal(_ sid: String) {
         guard goal?.status == "active" else { return }
         Task {
-            for wait in [3, 12] {
-                try? await Task.sleep(for: .seconds(wait))
+            for _ in 0..<20 {
+                try? await Task.sleep(for: .seconds(3))
+                guard openChat?.sid == sid else { return }
                 await refreshGoal(sid)
-                guard goal?.status == "active" else { return }
+                guard goal?.status == "active", !runningChats.contains(sid), !streaming else { return }
             }
         }
+    }
+
+    /// Yes or no to the offer to keep going. A yes starts the next answer at once.
+    func answerGoalOffer(sid: String, accept: Bool) async {
+        for _ in 0..<40 where server == nil { try? await Task.sleep(for: .milliseconds(100)) }
+        guard let server else { return }
+        if openChat?.sid == sid { goalOffer = nil }
+        do {
+            let r = try await server.goal(sid, op: accept ? "accept" : "decline")
+            if openChat?.sid == sid { goal = r.goal }
+            if r.started {
+                toast("Carrying on toward the goal")
+                if openChat?.sid == sid { try? await Task.sleep(for: .milliseconds(700)); await open(sid) }
+            }
+        } catch {
+            toast(error.localizedDescription)
+        }
+        clearGoalOfferNotification(sid)
+    }
+
+    /// The offer, on the Lock Screen when you are not looking: Keep going / No thanks.
+    func notifyGoalOffer(_ o: GoalOffer, sid: String) {
+        guard backgrounded else { return }
+        let c = UNMutableNotificationContent()
+        c.title = "Keep going until it's done?"
+        var body = o.why.prefix(1).uppercased() + o.why.dropFirst()
+        if let dl = o.deadline {
+            body += " — it carries on by itself at " + dl.formatted(date: .omitted, time: .shortened) + " unless you say no"
+        }
+        c.body = AppState.lockScreen(String(body.prefix(240)), otherwise: "A chat has work left. Open Orbit.")
+        c.sound = .default
+        c.categoryIdentifier = Notifications.offerCategory
+        c.userInfo = ["sid": sid]
+        UNUserNotificationCenter.current().add(
+            UNNotificationRequest(identifier: "goaloffer-" + sid, content: c, trigger: nil))
+    }
+
+    func clearGoalOfferNotification(_ sid: String) {
+        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ["goaloffer-" + sid])
     }
 
     func goalAction(_ op: String, objective: String? = nil, tokenBudget: Int? = nil,

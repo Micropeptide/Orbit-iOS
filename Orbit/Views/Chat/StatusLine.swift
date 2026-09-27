@@ -149,6 +149,10 @@ struct GitDock: View {
     @State private var git: GitState?
     @State private var at = Date.distantPast
     @State private var shown: (path: String, diff: String)?
+    /// Comments on diff lines, for the model: (file, line, comment).
+    @State private var notes: [(path: String, line: String, text: String)] = []
+    @State private var commenting: (path: String, line: String)?
+    @State private var comment = ""
 
     /// Read again when a turn lands or an answer starts or ends — not on every token.
     private var key: String { "\(sid)|\(state.messages.count)|\(state.streaming)" }
@@ -212,10 +216,37 @@ struct GitDock: View {
         .sheet(isPresented: Binding(get: { shown != nil }, set: { if !$0 { shown = nil } })) {
             if let s = shown {
                 NavigationStack {
-                    ScrollView { DiffView(diff: s.diff, path: s.path).padding() }
-                        .navigationTitle((s.path as NSString).lastPathComponent)
-                        .navigationBarTitleDisplayMode(.inline)
-                        .toolbar { Button("Done") { shown = nil } }
+                    ScrollView {
+                        DiffView(diff: s.diff, path: s.path) { line in
+                            comment = ""; commenting = (s.path, line)
+                        }
+                        .padding()
+                        Text("Tap a line to comment on it; the comments go into your message.")
+                            .font(.caption2).foregroundStyle(.secondary).padding(.horizontal)
+                    }
+                    .navigationTitle((s.path as NSString).lastPathComponent)
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        if !notes.isEmpty {
+                            ToolbarItem(placement: .bottomBar) {
+                                Button("Add \(notes.count) comment\(notes.count == 1 ? "" : "s") to message") { sendNotes() }
+                            }
+                        }
+                        ToolbarItem(placement: .confirmationAction) { Button("Done") { shown = nil } }
+                    }
+                    .alert("Comment on this line", isPresented: Binding(
+                        get: { commenting != nil }, set: { if !$0 { commenting = nil } })) {
+                        TextField("What should change here?", text: $comment)
+                        Button("Add") {
+                            if let c = commenting, !comment.trimmingCharacters(in: .whitespaces).isEmpty {
+                                notes.append((c.path, c.line, comment.trimmingCharacters(in: .whitespaces)))
+                            }
+                            commenting = nil
+                        }
+                        Button("Cancel", role: .cancel) { commenting = nil }
+                    } message: {
+                        Text(commenting?.line.trimmingCharacters(in: .whitespaces) ?? "")
+                    }
                 }
             }
         }
@@ -238,6 +269,16 @@ struct GitDock: View {
 }
 
 extension GitDock {
+    /// The comments, into the message box as review notes for the model.
+    fileprivate func sendNotes() {
+        let lines = notes.map { n in
+            "- \((n.path as NSString).lastPathComponent): `\(n.line.trimmingCharacters(in: .whitespaces).prefix(160))` — \(n.text)"
+        }
+        state.quoteInDraftPlain("Comments on your changes:\n" + lines.joined(separator: "\n"))
+        notes = []
+        shown = nil
+    }
+
     fileprivate func show(_ path: String) async {
         guard let server = state.server else { return }
         do {

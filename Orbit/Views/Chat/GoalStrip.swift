@@ -6,10 +6,14 @@ struct GoalStrip: View {
     let sid: String
     @EnvironmentObject var state: AppState
     @State private var confirmClear = false
+    @State private var showHistory = false
 
     var body: some View {
         Group {
-            if let g = state.goal, state.openChat?.sid == sid {
+            if let o = state.goalOffer, state.openChat?.sid == sid,
+               state.goal == nil || state.goal?.status == "complete" {
+                OfferCard(sid: sid, offer: o)
+            } else if let g = state.goal, state.openChat?.sid == sid {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 6) {
                         Image(systemName: icon(g.status)).foregroundStyle(tint(g.status))
@@ -32,6 +36,26 @@ struct GoalStrip: View {
                     Text(g.usage).font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
                     if !g.reason.isEmpty {
                         Text(g.reason).font(.caption2).foregroundStyle(.secondary).lineLimit(3)
+                    }
+                    // what each check said: why it carried on, and why it stopped
+                    if g.history.count > 1 {
+                        DisclosureGroup(isExpanded: $showHistory) {
+                            ScrollView {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    ForEach(Array(g.history.reversed().enumerated()), id: \.offset) { _, h in
+                                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                            Text(Date(timeIntervalSince1970: h.t).formatted(date: .omitted, time: .shortened))
+                                                .font(.caption2.monospacedDigit()).foregroundStyle(.tertiary)
+                                            Text(h.verdict).font(.caption2.weight(.semibold))
+                                            Text(h.reason).font(.caption2).foregroundStyle(.secondary)
+                                        }
+                                    }
+                                }
+                            }
+                            .frame(maxHeight: 120)
+                        } label: {
+                            Text("History").font(.caption2)
+                        }
                     }
                 }
                 .padding(.horizontal, 14).padding(.vertical, 6)
@@ -72,6 +96,54 @@ struct GoalStrip: View {
         case "paused": return .secondary
         default: return .orange
         }
+    }
+}
+
+/// The answer left work undone: keep going until it is done? Taken on its own when the
+/// countdown runs out, unless you say no.
+struct OfferCard: View {
+    let sid: String
+    let offer: GoalOffer
+    @EnvironmentObject var state: AppState
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 6) {
+                Image(systemName: "scope").foregroundStyle(Color.accentColor)
+                Text("Keep going until it's done?").font(.caption.weight(.semibold))
+            }
+            Text(offer.objective).font(.caption).lineLimit(2).foregroundStyle(.secondary)
+            TimelineView(.periodic(from: .now, by: 1)) { ctx in
+                Text(line(at: ctx.date)).font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+            }
+            HStack {
+                Button("Keep going until done") {
+                    Task { await state.answerGoalOffer(sid: sid, accept: true) }
+                }
+                .buttonStyle(.borderedProminent).controlSize(.small)
+                Button("No thanks") {
+                    Task { await state.answerGoalOffer(sid: sid, accept: false) }
+                }
+                .buttonStyle(.bordered).controlSize(.small)
+            }
+        }
+        .padding(.horizontal, 14).padding(.vertical, 7)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.accentColor.opacity(0.07))
+        .overlay(alignment: .leading) { Rectangle().fill(Color.accentColor).frame(width: 3) }
+        .overlay(Divider(), alignment: .top)
+    }
+
+    private func line(at now: Date) -> String {
+        let why = offer.why.prefix(1).uppercased() + offer.why.dropFirst()
+        guard let dl = offer.deadline else { return why }
+        let left = Int(max(0, dl.timeIntervalSince(now)))
+        if left == 0 {
+            // taken on the Mac: pick up the goal it just started
+            Task { try? await Task.sleep(for: .seconds(3)); if state.goalOffer == offer { state.goalOffer = nil; await state.open(sid) } }
+            return why + " · carrying on…"
+        }
+        return why + " · it carries on by itself in \(left / 60):" + String(format: "%02d", left % 60)
     }
 }
 

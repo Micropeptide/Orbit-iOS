@@ -32,6 +32,7 @@ final class AppState: ObservableObject {
     @Published var runningSince: [String: Double] = [:]
     /// The open chat's goal (Goal.swift), and whether its editor is showing.
     @Published var goal: Goal?
+    @Published var goalOffer: GoalOffer?
     @Published var showGoalEditor = false
     /// Set to push a conversation onto the stack — used by deep links today and
     /// by notification taps later.
@@ -152,17 +153,25 @@ final class AppState: ObservableObject {
         else { return false }
         let map = Dictionary(items.compactMap { i in i.value.map { (i.name, $0) } },
                              uniquingKeysWith: { a, _ in a })
-        guard let base = map["url"], let token = map["token"], !base.isEmpty, !token.isEmpty
-        else { return false }
+        guard let base = map["url"], !base.isEmpty else { return false }
         let clean = base.hasSuffix("/") ? String(base.dropLast()) : base
-        if !confirmed, let cur = pairing, cur.url != clean || cur.token != token {
-            pendingPair = (url, URL(string: clean)?.host ?? clean)
-            return false
-        }
         let alts = (map["alts"] ?? "").split(separator: ",").map(String.init)
             .map { $0.hasSuffix("/") ? String($0.dropLast()) : $0 }
             .filter { !$0.isEmpty }
+        // A Mac that gives each device its own token puts a one-time code in the QR;
+        // the phone trades it for its token (Links.swift). An older Mac sends the token.
+        let token = map["token"] ?? ""
+        let code = map["code"] ?? ""
+        guard !token.isEmpty || !code.isEmpty else { return false }
+        if !confirmed, let cur = pairing, cur.url != clean || (!token.isEmpty && cur.token != token) {
+            pendingPair = (url, URL(string: clean)?.host ?? clean)
+            return false
+        }
         pendingPair = nil
+        if token.isEmpty {
+            Task { await claimPairing(url: clean, alts: alts, code: code, name: map["name"] ?? "Mac") }
+            return true
+        }
         pairing = Pairing(url: clean,
                           token: token, name: map["name"] ?? "Mac",
                           alts: alts.isEmpty ? nil : alts)
@@ -380,6 +389,7 @@ final class AppState: ObservableObject {
             chatExtras.prefs = [:]
             chatExtras.easyMode = false
             goal = nil
+            goalOffer = nil
         }
         markSeen(id)
         // show the cached copy immediately; the network fills it in
@@ -398,6 +408,7 @@ final class AppState: ObservableObject {
             chatExtras.prefs = d.prefs ?? [:]
             chatExtras.easyMode = d.easy_mode ?? false
             goal = d.goal
+            goalOffer = d.goal_offer
             var fresh = d.messages
             // Mid-answer the Mac may not have written the question yet (it starts
             // the model server first). Keep the one we showed rather than losing it.
@@ -474,6 +485,7 @@ final class AppState: ObservableObject {
             : ([text] + going.map { "📎 \($0.name)" })
                 .filter { !$0.isEmpty }.joined(separator: "\n")
         messages.append(Message(role: "user", text: label))
+        goalOffer = nil                          // you moved on: the Mac withdraws it too
         // each new request starts a fresh plan on the Mac; "continue" carries the old one on
         if !text.lowercased().hasPrefix("continue") { plans[sid] = nil }
         beginLive(for: sid)
