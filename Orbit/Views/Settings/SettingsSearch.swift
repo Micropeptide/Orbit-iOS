@@ -53,6 +53,7 @@ enum SettingsIndex {
 struct SettingsSearchResults: View {
     let term: String
     let jump: (String) -> Void
+    @Environment(\.dismissSearch) private var dismissSearch
 
     private var hits: [SettingsSearchEntry] {
         SettingsIndex.all.filter { $0.matches(term.trimmingCharacters(in: .whitespaces)) }
@@ -66,7 +67,7 @@ struct SettingsSearchResults: View {
             ForEach(hits) { e in
                 switch e.target {
                 case .here(let id):
-                    Button { jump(id) } label: { row(e) }
+                    Button { dismissSearch(); jump(id) } label: { row(e) }
                         .foregroundStyle(.primary)
                 case .page(let make):
                     NavigationLink { make() } label: { row(e) }
