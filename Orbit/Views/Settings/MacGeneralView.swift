@@ -100,6 +100,13 @@ struct MacGeneralView: View {
                 Text("Report and fix").tag("fix")
             }
             Toggle("Check the work before finishing", isOn: word("verify_turns", on: "tools"))
+            Toggle("Offer to keep going", isOn: Binding(
+                get: { value("goal_offers")?.bool ?? true }, set: { set("goal_offers", .bool($0)) }))
+            if value("goal_offers")?.bool ?? true {
+                Stepper(offerWait == 0 ? "Wait for my answer" : "Take it after \(offerWait / 60 > 0 ? "\(offerWait / 60) min " : "")\(offerWait % 60 > 0 ? "\(offerWait % 60) s" : "")",
+                        value: Binding(get: { offerWait }, set: { set("goal_offer_wait_s", .number(Double($0))) }),
+                        in: 0...3600, step: 30)
+            }
         } header: {
             Text("Orbit's own work")
         } footer: {
@@ -108,12 +115,15 @@ struct MacGeneralView: View {
                  + "turn it just finished means queueing behind that turn — name a hosted model "
                  + "here and that work runs while the local one is busy. The review reads the diff "
                  + "back and says what is wrong with it (and with \"Report and fix\", the chat answers it, up to "
-                 + "twice); the check looks through the transcript for "
+                 + "twice); \"Offer to keep going\" asks, when an answer plainly left work undone, whether to make it a "
+                 + "goal — and takes it by itself after the time you set unless you say no; the check looks through the transcript for "
                  + "evidence the work was actually done, and passes it if it cannot run.")
         }
     }
 
     /// A setting the Mac stores as a word rather than a switch ("" off, "changes" on).
+    private var offerWait: Int { Int(value("goal_offer_wait_s")?.double ?? 120) }
+
     private func word(_ key: String, on: String) -> Binding<Bool> {
         Binding(get: { !(value(key)?.string ?? "").isEmpty },
                 set: { set(key, .string($0 ? on : "")) })

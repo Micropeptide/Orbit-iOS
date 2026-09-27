@@ -171,9 +171,11 @@ struct ChatDetail: Codable {
     var easy_mode: Bool?
     /// What this chat keeps working toward, if anything (Goal.swift).
     var goal: Goal?
+    /// An open offer to keep going until the work is done.
+    var goal_offer: GoalOffer?
 
     enum CodingKeys: String, CodingKey {
-        case sid, title, messages, n, running, context, plan_mode, prefs, easy_mode, goal
+        case sid, title, messages, n, running, context, plan_mode, prefs, easy_mode, goal, goal_offer
     }
 
     init(sid: String, title: String? = nil, messages: [Message] = []) {
@@ -199,6 +201,7 @@ struct ChatDetail: Codable {
         prefs = c.lenient([String: JSONValue].self, .prefs)
         easy_mode = c.lenient(Bool.self, .easy_mode)
         goal = c.lenient(Goal.self, .goal)
+        goal_offer = c.lenient(GoalOffer.self, .goal_offer)
     }
 }
 
@@ -562,11 +565,14 @@ struct ScheduledTask: Identifiable, Codable, Hashable {
     var kind: String?
     var why: String?
     var attempt: Int?
+    /// Stops repeating once the Mac judges its prompt met ("until the tests pass").
+    var until_done: Bool?
+    var done_at: Double?
 
     enum CodingKeys: String, CodingKey {
         case id, name, prompt, every, at, at_ts, n, weekday, stop_at, model, agent, sid, project,
              enabled, last_run, last_ok, last_result, last_sid, next_ts, next
-        case kind, why, attempt
+        case kind, why, attempt, until_done, done_at
     }
 
     init(from d: Decoder) throws {
@@ -594,6 +600,8 @@ struct ScheduledTask: Identifiable, Codable, Hashable {
         kind = try? c.decode(String.self, forKey: .kind)
         why = try? c.decode(String.self, forKey: .why)
         attempt = c.lenientDouble(.attempt).map { Int($0) }
+        until_done = c.lenientBool(.until_done)
+        done_at = c.lenientDouble(.done_at)
     }
 
     init(new: Void = ()) {

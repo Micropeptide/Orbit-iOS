@@ -22,6 +22,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         // and replied to: a message into that chat, or an answer to its question
         router.reply = { sid, text in await state.replyFromNotification(sid: sid, text: text) }
         router.answerQuestion = { id, text in await state.answerFromNotification(questionID: id, text: text) }
+        router.goalOffer = { sid, yes in await state.answerGoalOffer(sid: sid, accept: yes) }
         UNUserNotificationCenter.current().delegate = router
         Notifications.register()
         return true
@@ -99,6 +100,10 @@ enum Notifications {
     /// A question the answer is waiting on: answer it from the notification.
     static let questionCategory = "orbit.question"
     static let answerQuestion = "orbit.question.answer"
+    /// An answer left work undone: keep going until it is done, or not.
+    static let offerCategory = "orbit.goaloffer"
+    static let offerAccept = "orbit.goaloffer.accept"
+    static let offerDecline = "orbit.goaloffer.decline"
 
     /// Registered once at launch: an approval can be answered from the Lock Screen,
     /// which is where you are when a run stops to ask.
@@ -125,6 +130,12 @@ enum Notifications {
                                    intentIdentifiers: [], options: []),
             UNNotificationCategory(identifier: questionCategory, actions: [answerAction],
                                    intentIdentifiers: [], options: []),
+            // starting work on the Mac from the Lock Screen needs the phone unlocked
+            UNNotificationCategory(identifier: offerCategory, actions: [
+                UNNotificationAction(identifier: offerAccept, title: "Keep going until done",
+                                     options: [.authenticationRequired]),
+                UNNotificationAction(identifier: offerDecline, title: "No thanks", options: []),
+            ], intentIdentifiers: [], options: []),
         ])
     }
 }
@@ -139,6 +150,8 @@ final class NotificationRouter: NSObject, UNUserNotificationCenterDelegate {
     var reply: (@MainActor (String, String) async -> Void)?
     /// (question id, text) — an answer typed on a question's notification.
     var answerQuestion: (@MainActor (String, String) async -> Void)?
+    /// (chat id, yes) — the offer to keep going, answered from its notification.
+    var goalOffer: (@MainActor (String, Bool) async -> Void)?
 
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 didReceive response: UNNotificationResponse,
@@ -161,6 +174,10 @@ final class NotificationRouter: NSObject, UNUserNotificationCenterDelegate {
                 await self.reply?(sid!, typed)
             case Notifications.answerQuestion where !questionID.isEmpty:
                 await self.answerQuestion?(questionID, typed)
+            case Notifications.offerAccept where sid != nil:
+                await self.goalOffer?(sid!, true)
+            case Notifications.offerDecline where sid != nil:
+                await self.goalOffer?(sid!, false)
             default:
                 if let sid { self.open?(sid) }
             }

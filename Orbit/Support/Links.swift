@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 /// orbit:// links, from a notification, a push (its Click), a Shortcut or another app:
 ///
@@ -35,6 +36,29 @@ extension AppState {
         default:
             return false
         }
+    }
+
+    /// Trade the QR's one-time code for this phone's own token, then pair with it.
+    func claimPairing(url: String, alts: [String], code: String, name: String) async {
+        struct Claimed: Decodable { var token: String?; var error: String? }
+        for base in [url] + alts {
+            guard let u = URL(string: base + "/api/pair/claim") else { continue }
+            var req = URLRequest(url: u, timeoutInterval: 15)
+            req.httpMethod = "POST"
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.httpBody = try? JSONSerialization.data(withJSONObject: ["code": code, "name": UIDevice.current.name])
+            guard let (data, resp) = try? await URLSession.shared.data(for: req) else { continue }   // try the next address
+            let r = try? JSONDecoder().decode(Claimed.self, from: data)
+            if let tok = r?.token, !tok.isEmpty {
+                pairing = Pairing(url: url, token: tok, name: name, alts: alts.isEmpty ? nil : alts)
+                await refreshEverything()
+                return
+            }
+            let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            toast(r?.error ?? "Pairing failed (\(status)) — show the QR on the Mac again")
+            return
+        }
+        toast("Couldn't reach the Mac to pair — is it on, and is Phone access turned on?")
     }
 
     /// A reply typed on a notification: it joins that chat's queue on the Mac, which

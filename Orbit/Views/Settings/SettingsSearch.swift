@@ -21,7 +21,24 @@ enum SettingsIndex {
         .page { AnyView(v()) }
     }
 
-    static let all: [SettingsSearchEntry] = [
+    /// This screen's sections, by hand (they live in one file and rarely change), then every
+    /// page of the Mac's settings with the words on it, generated on each build from the
+    /// screens themselves (scripts/gen-settings-index), plus a few words people use for them.
+    static let all: [SettingsSearchEntry] = here + generated.map { e in
+        SettingsSearchEntry(title: e.title, place: e.place,
+                            words: e.words + " " + (synonyms[e.title] ?? ""), target: e.target)
+    }
+
+    static let synonyms: [String: String] = [
+        "Models & keys": "api key provider openai anthropic deepseek opencode hidden removed",
+        "When a model keeps failing": "fallback retry usage limit",
+        "General": "side work helper model reviewer review fix verify check auto-compact quiet recycle bin goal offer",
+        "Tools & rules": "permissions allow deny shell write anywhere code execution screen control",
+        "Phone access": "pairing qr code token devices revoke unpair tailscale network",
+        "Status & health": "doctor diagnostics launch flags",
+    ]
+
+    static let here: [SettingsSearchEntry] = [
         // this screen
         .init(title: "Model server", place: "Settings", words: "local model start stop restart mtplx memory", target: .here("server")),
         .init(title: "How chats run", place: "Settings", words: "harness engine claude code codex orbit mode", target: .here("harness")),
@@ -35,18 +52,6 @@ enum SettingsIndex {
         .init(title: "Offline copy", place: "Settings", words: "offline cache clear", target: .here("offline")),
         .init(title: "Unpair this phone", place: "Settings", words: "unpair pairing token forget", target: .here("unpair")),
         .init(title: "About Orbit", place: "Settings", words: "about version licence license", target: .here("about")),
-        // pages on the Mac's settings
-        .init(title: "Models & keys", place: "Settings on the Mac", words: "models keys api key provider openai anthropic deepseek opencode fetch hidden removed", target: page(ModelsKeysView())),
-        .init(title: "When a model keeps failing", place: "Settings on the Mac", words: "fallback failing retry usage limit resume after limit", target: page(FallbackView())),
-        .init(title: "General", place: "Settings on the Mac", words: "side work helper model reviewer review what an answer changed report fix check the work verify thinking reasoning effort tool rounds minutes auto-compact quiet mode recycle bin system prompt temperature sampling", target: page(MacGeneralView())),
-        .init(title: "Local server", place: "Settings on the Mac", words: "local server context window kv quantization fan idle shutdown draft depth prefill scheduler", target: page(LocalServerView())),
-        .init(title: "Tools & rules", place: "Settings on the Mac", words: "tools rules permissions allow deny shell write anywhere code execution screen control cluster", target: page(ToolsRulesView())),
-        .init(title: "Easy mode", place: "Settings on the Mac", words: "easy mode fewer tools small model", target: page(EasyModeView())),
-        .init(title: "MCP servers", place: "Settings on the Mac", words: "mcp servers connectors", target: page(MCPServersView())),
-        .init(title: "Claude Code", place: "Settings on the Mac", words: "claude code permission mode hooks skills plugins mcp remote machines ssh profile instructions", target: page(ClaudeCodeSettingsView())),
-        .init(title: "Codex", place: "Settings on the Mac", words: "codex agents.md chatgpt limits instructions", target: page(CodexSettingsView())),
-        .init(title: "Phone access", place: "Settings on the Mac", words: "phone access tailscale pairing qr code token rotate network push ntfy", target: page(PhoneAccessView())),
-        .init(title: "Status & health", place: "Settings on the Mac", words: "status health doctor launch flags system prompt", target: page(StatusHealthView())),
     ]
 }
 

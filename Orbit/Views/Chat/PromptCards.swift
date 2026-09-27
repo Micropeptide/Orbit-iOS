@@ -319,6 +319,8 @@ struct ApprovalCard: View {
 struct DiffView: View {
     let diff: String
     var path: String? = nil
+    /// When set, tapping a line asks for a comment on it (the line's text is passed).
+    var onComment: ((String) -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -329,11 +331,17 @@ struct DiffView: View {
             }
             ScrollView([.horizontal, .vertical]) {
                 VStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(Self.highlighted(Self.lines(diff)).enumerated()), id: \.offset) { _, row in
-                        Text(row.text)
+                    ForEach(Array(Self.highlighted(Self.lines(diff)).enumerated()), id: \.offset) { i, row in
+                        let line = Text(row.text)
                             .font(.caption2.monospaced())
                             .foregroundStyle(row.color)
                             .fixedSize(horizontal: true, vertical: false)
+                        if let onComment {
+                            line.contentShape(.rect)
+                                .onTapGesture { onComment(String(row.text.characters)) }
+                        } else {
+                            line
+                        }
                     }
                 }
                 .padding(8)
