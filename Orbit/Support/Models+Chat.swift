@@ -355,6 +355,10 @@ enum SeenChats {
     }
 
     static func isUnread(_ chat: ChatSummary, seen: [String: Double]) -> Bool {
+        // The Mac knows when the last answer landed; the chat's time is only the last
+        // message you sent, so an answer that finished after you left never changed it
+        // and never showed as new.
+        if let u = chat.unread { return u }
         guard let t = seen[chat.id] else { return false }
         return chat.mtime > t + 2
     }

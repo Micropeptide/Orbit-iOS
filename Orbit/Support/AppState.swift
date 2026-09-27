@@ -130,9 +130,18 @@ final class AppState: ObservableObject {
 
     // ------------------------------------------------------------ pairing
 
+    /// A pairing link that would replace the Mac this phone is paired with, waiting for
+    /// you to say yes (RootView asks).
+    @Published var pendingPair: (url: URL, host: String)?
+
     /// Accept `orbit://pair?url=…&token=…&name=…`, from a QR scan or a tapped link.
+    ///
+    /// A link that points somewhere else than the Mac already paired is held until you
+    /// confirm it: any web page could offer one, and after a single "Open in Orbit?" your
+    /// prompts and attachments went to whoever made it. `confirmed` is that yes (or the
+    /// camera, which you pointed at the code yourself).
     @discardableResult
-    func pair(from url: URL) -> Bool {
+    func pair(from url: URL, confirmed: Bool = false) -> Bool {
         guard url.scheme == "orbit", url.host == "pair",
               let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems
         else { return false }
@@ -140,10 +149,16 @@ final class AppState: ObservableObject {
                              uniquingKeysWith: { a, _ in a })
         guard let base = map["url"], let token = map["token"], !base.isEmpty, !token.isEmpty
         else { return false }
+        let clean = base.hasSuffix("/") ? String(base.dropLast()) : base
+        if !confirmed, let cur = pairing, cur.url != clean || cur.token != token {
+            pendingPair = (url, URL(string: clean)?.host ?? clean)
+            return false
+        }
         let alts = (map["alts"] ?? "").split(separator: ",").map(String.init)
             .map { $0.hasSuffix("/") ? String($0.dropLast()) : $0 }
             .filter { !$0.isEmpty }
-        pairing = Pairing(url: base.hasSuffix("/") ? String(base.dropLast()) : base,
+        pendingPair = nil
+        pairing = Pairing(url: clean,
                           token: token, name: map["name"] ?? "Mac",
                           alts: alts.isEmpty ? nil : alts)
         Task { await refreshEverything() }
@@ -650,6 +665,8 @@ final class AppState: ObservableObject {
         case .error(let e):    lastError = e
         case .extra(let e):    applyExtra(e)
         case .end(_, let title):
+            // it finished in front of you: not new, here or on the Mac
+            if !backgrounded, let s = liveSid, openChat?.sid == s { seenOnMac(s) }
             if let title, var c = openChat {
                 c.title = title
                 openChat = c
@@ -685,8 +702,9 @@ final class AppState: ObservableObject {
         // the chat that asked, which is not always the chat you have open
         let name = (openChat?.sid == sid ? openChat?.title : nil)
             ?? chats.first { $0.id == sid }?.title ?? "Orbit"
-        c.title = name + " needs your approval"
-        c.body = String((a.reason.isEmpty ? a.name : a.reason).prefix(240))
+        c.title = Self.lockScreen(name, otherwise: "Orbit") + " needs your approval"
+        c.body = Self.lockScreen(String((a.reason.isEmpty ? a.name : a.reason).prefix(240)),
+                                 otherwise: "Unlock to see what it wants to do.")
         c.sound = .default
         c.categoryIdentifier = Notifications.approvalCategory
         c.userInfo = ["sid": sid, "approvalID": a.id]
@@ -725,11 +743,18 @@ final class AppState: ObservableObject {
         n.removePendingNotificationRequests(withIdentifiers: ["approval-" + id])
     }
 
+    /// What a notification may say on the Lock Screen. With the Face ID lock on, the
+    /// app hides your chats behind it -- and its notifications printed up to 240
+    /// characters of the answer or the command for anyone holding the phone.
+    static func lockScreen(_ text: String, otherwise: String = "Open Orbit to read it.") -> String {
+        UserDefaults.standard.bool(forKey: "faceID") ? otherwise : text
+    }
+
     func notifyIfBackgrounded(title: String, body: String, sid: String? = nil) {
         guard backgrounded else { return }
         let c = UNMutableNotificationContent()
         c.title = title
-        c.body = String(body.prefix(240))
+        c.body = Self.lockScreen(String(body.prefix(240)))
         c.sound = .default
         if let sid { c.userInfo = ["sid": sid] }     // tapping it opens that chat
         UNUserNotificationCenter.current().add(
