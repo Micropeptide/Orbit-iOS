@@ -33,6 +33,8 @@ final class AppState: ObservableObject {
     /// The open chat's goal (Goal.swift), and whether its editor is showing.
     @Published var goal: Goal?
     @Published var goalOffer: GoalOffer?
+    /// The Mac answered, and refused this phone's token: revoked, or unpaired there.
+    @Published var refusedByMac = false
     @Published var showGoalEditor = false
     /// Set to push a conversation onto the stack — used by deep links today and
     /// by notification taps later.
@@ -237,9 +239,18 @@ final class AppState: ObservableObject {
             _ = try await server.health()
             latencyMS = Int(Date().timeIntervalSince(t0) * 1000)
             reachable = true
+            refusedByMac = false
             lastError = nil
             await learnAlternates()
         } catch {
+            // It answered, and said no: not a network problem, and no other address
+            // will answer differently. Say so, rather than "can't reach".
+            if case OrbitServer.Failure.unauthorised = error {
+                refusedByMac = true
+                reachable = false
+                lastError = error.localizedDescription
+                return
+            }
             // The address in the QR is not always the one that works from here
             // (no MagicDNS on this phone, a new DHCP lease). Try the others the
             // Mac listed and keep whichever answers.

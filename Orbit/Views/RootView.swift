@@ -99,7 +99,25 @@ struct ConnectionBanner: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if state.reachable == false {
+            if state.refusedByMac {
+                HStack(spacing: 8) {
+                    Image(systemName: "lock.slash")
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("This phone is no longer paired with \(state.macDisplayName)")
+                            .font(.footnote.weight(.semibold))
+                        Text("It was revoked or unpaired on the Mac. Scan the QR in Settings → Phone there to pair again.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button("Pair again") { state.unpair() }
+                        .font(.caption.weight(.semibold))
+                        .buttonStyle(.bordered)
+                }
+                .padding(.horizontal, 14).padding(.vertical, 9)
+                .background(.thinMaterial)
+                .overlay(Divider(), alignment: .bottom)
+            } else if state.reachable == false {
                 HStack(spacing: 8) {
                     Image(systemName: "wifi.slash")
                     VStack(alignment: .leading, spacing: 1) {
