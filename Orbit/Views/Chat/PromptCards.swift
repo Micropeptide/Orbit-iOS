@@ -329,11 +329,10 @@ struct DiffView: View {
             }
             ScrollView([.horizontal, .vertical]) {
                 VStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(diff.split(separator: "\n", omittingEmptySubsequences: false).prefix(400).enumerated()),
-                            id: \.offset) { _, line in
-                        Text(String(line))
+                    ForEach(Array(Self.lines(diff).enumerated()), id: \.offset) { _, row in
+                        Text(row.text)
                             .font(.caption2.monospaced())
-                            .foregroundStyle(color(line))
+                            .foregroundStyle(row.color)
                             .fixedSize(horizontal: true, vertical: false)
                     }
                 }
@@ -345,10 +344,19 @@ struct DiffView: View {
         .background(.quaternary.opacity(0.35), in: .rect(cornerRadius: 9))
     }
 
-    private func color(_ l: Substring) -> Color {
-        if l.hasPrefix("+") && !l.hasPrefix("+++") { return .green }
-        if l.hasPrefix("-") && !l.hasPrefix("---") { return .red }
-        return .primary
+    /// Each line and its colour. The `---`/`+++` file headers come before the first
+    /// hunk; inside one, a removed "-- comment" or an added "++i" is a real change, and
+    /// colouring by prefix alone showed those as unchanged.
+    static func lines(_ diff: String) -> [(text: String, color: Color)] {
+        var inHunk = false
+        return diff.split(separator: "\n", omittingEmptySubsequences: false).prefix(400).map { l in
+            if l.hasPrefix("@@") { inHunk = true; return (String(l), .secondary) }
+            if !inHunk && (l.hasPrefix("---") || l.hasPrefix("+++")) { return (String(l), .secondary) }
+            if l.hasPrefix("... ") { return (String(l), .secondary) }       // "N more lines not shown"
+            if l.hasPrefix("+") { return (String(l), .green) }
+            if l.hasPrefix("-") { return (String(l), .red) }
+            return (String(l), .primary)
+        }
     }
 }
 

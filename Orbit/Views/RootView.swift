@@ -67,6 +67,17 @@ struct RootView: View {
         }
         }
         .preferredColorScheme(Appearance.scheme(theme))
+        .alert("Pair with a different Mac?", isPresented: Binding(
+            get: { state.pendingPair != nil }, set: { if !$0 { state.pendingPair = nil } })) {
+            Button("Replace pairing", role: .destructive) {
+                if let p = state.pendingPair { state.pair(from: p.url, confirmed: true) }
+            }
+            Button("Cancel", role: .cancel) { state.pendingPair = nil }
+        } message: {
+            Text("A link asked to pair this phone with \(state.pendingPair?.host ?? "another computer"). "
+                 + "Your chats, prompts and attachments would go there instead of \(state.pairing?.name ?? "your Mac"). "
+                 + "Only continue if you just showed this code on your own Mac.")
+        }
         .environment(\.blockActions, blockActions)
         .onAppear {
             blockActions.state = state

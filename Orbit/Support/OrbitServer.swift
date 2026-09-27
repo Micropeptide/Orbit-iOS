@@ -332,6 +332,11 @@ actor OrbitServer {
         return try JSONDecoder().decode(N.self, from: data).sid
     }
 
+    /// Looked at on this phone: the Mac, and every other device, stop showing it as new.
+    func markSeen(_ id: String) async throws {
+        try await post("/api/session/seen", ["id": id])
+    }
+
     func rename(_ id: String, to title: String) async throws {
         try await post("/api/session/rename", ["id": id, "title": title])
     }

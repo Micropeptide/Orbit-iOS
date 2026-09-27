@@ -67,7 +67,7 @@ struct PairingView: View {
             .sheet(isPresented: $scanning) {
                 QRScannerView { value in
                     scanning = false
-                    guard let url = URL(string: value), state.pair(from: url) else {
+                    guard let url = URL(string: value), state.pair(from: url, confirmed: true) else {
                         failed = "That QR code isn't an Orbit pairing code."
                         return
                     }

@@ -32,6 +32,9 @@ struct ChatSummary: Identifiable, Codable, Hashable {
     var cwd: String?
     var host: String?
     var model: String?
+    /// An answer has landed since the chat was last looked at, on any device. The Mac
+    /// keeps this; nil from an older Mac, which the phone then guesses at itself.
+    var unread: Bool?
 
     var displayTitle: String { (title?.isEmpty == false ? title! : "New chat") }
     var date: Date { Date(timeIntervalSince1970: mtime) }
@@ -39,7 +42,7 @@ struct ChatSummary: Identifiable, Codable, Hashable {
     enum CodingKeys: String, CodingKey {
         case id, title, n, mtime, pinned, archived, project, tags
         case queued, scheduled
-        case external, source, cwd, host, model
+        case external, source, cwd, host, model, unread
     }
 
     init(from d: Decoder) throws {
@@ -59,6 +62,7 @@ struct ChatSummary: Identifiable, Codable, Hashable {
         cwd = try? c.decode(String.self, forKey: .cwd)
         host = (try? c.decode(String.self, forKey: .host)).flatMap { $0.isEmpty ? nil : $0 }
         model = try? c.decode(String.self, forKey: .model)
+        unread = c.lenientBool(.unread)
     }
 }
 

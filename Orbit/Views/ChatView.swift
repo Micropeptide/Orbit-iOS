@@ -266,7 +266,11 @@ struct ChatView: View {
                 jumpTo = nil
             }
             .onAppear { scroll(proxy, animated: false) }
-            .onDisappear { SeenChats.mark(sid, mtime: state.chats.first { $0.id == sid }?.mtime ?? 0) }
+            .onDisappear {
+                SeenChats.mark(sid, mtime: state.chats.first { $0.id == sid }?.mtime ?? 0)
+                // leaving after watching it answer: that answer has been seen
+                if !(state.streaming && state.liveSid == sid) { state.seenOnMac(sid) }
+            }
             .modifier(AnswerTextSize())
             // how long this is and where you are in it — a question the outline, which
             // lists what you asked, does not answer
@@ -284,6 +288,7 @@ struct ChatView: View {
                 draft = Drafts.load(sid)
                 await state.open(sid)
                 SeenChats.mark(sid, mtime: state.chats.first { $0.id == sid }?.mtime ?? 0)
+                state.markSeen(sid)
                 if let text = state.draftPrefill { draft = text; typing = true; state.draftPrefill = nil }
                 if highlight == nil { await pinToNewest(proxy) }
                 // a search hit: land on that message and flash it once the rows exist
