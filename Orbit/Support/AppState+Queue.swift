@@ -191,7 +191,8 @@ extension AppState {
         // without them, stayed behind after the approval was answered and kept the badge up
         case .approvalPrompt(let a): raise("Needs your approval", body: a.name + (a.reason.isEmpty ? "" : " — " + a.reason), sid: sid, post: false)
         case .approval(let n, let r, _): raise("Needs your approval", body: n + (r.isEmpty ? "" : " — " + r), sid: sid)
-        case .question(let q): raise("Orbit has a question", body: q.question, sid: sid)
+        case .question(let q): raise("Orbit has a question", body: q.question, sid: sid,
+                                     category: Notifications.questionCategory, info: ["questionID": q.id])
         case .error(let e): raise("Error", body: e, sid: sid)
         case .notice(let n) where n.lowercased().contains("limit") && n.lowercased().contains("usage")
             || n.lowercased().contains("plan limit"):
@@ -204,7 +205,8 @@ extension AppState {
     /// background, a toast when you are in another chat, nothing when you are
     /// looking at it. Only news you did not see counts toward the badge: while
     /// the app is away, or in a chat that is not on screen.
-    func raise(_ kind: String, body: String, sid: String, post: Bool = true) {
+    func raise(_ kind: String, body: String, sid: String, post: Bool = true,
+               category: String? = nil, info: [String: String] = [:]) {
         let looking = !backgrounded && openChat?.sid == sid
         guard !looking else { return }
         composerExtras.unseen[sid, default: 0] += 1
@@ -216,7 +218,8 @@ extension AppState {
             c.title = kind + (title.map { AppState.lockScreen(" — " + $0, otherwise: "") } ?? "")
             c.body = AppState.lockScreen(String(body.prefix(240)))
             if UserDefaults.standard.object(forKey: "orbit.sound") as? Bool ?? true { c.sound = .default }
-            c.userInfo = ["sid": sid]
+            c.userInfo = info.merging(["sid": sid]) { a, _ in a }
+            if let category { c.categoryIdentifier = category }
             c.threadIdentifier = "orbit-" + sid
             UNUserNotificationCenter.current().add(
                 UNNotificationRequest(identifier: UUID().uuidString, content: c, trigger: nil))

@@ -333,7 +333,8 @@ struct ChatListView: View {
                 Text(relative(chat.date) + (chat.n > 0 ? " · \(chat.n) messages" : " · empty"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                ChatStatusBadge(status: state.status(of: chat, seen: listModel.seen))
+                ChatStatusBadge(status: state.status(of: chat, seen: listModel.seen),
+                                since: state.runningSince[chat.id], goal: chat.goal)
                 if let tags = chat.tags, !tags.isEmpty {
                     HStack(spacing: 4) {
                         ForEach(tags.prefix(3), id: \.self) { t in

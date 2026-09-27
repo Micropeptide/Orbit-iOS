@@ -329,7 +329,7 @@ struct DiffView: View {
             }
             ScrollView([.horizontal, .vertical]) {
                 VStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(Self.lines(diff).enumerated()), id: \.offset) { _, row in
+                    ForEach(Array(Self.highlighted(Self.lines(diff)).enumerated()), id: \.offset) { _, row in
                         Text(row.text)
                             .font(.caption2.monospaced())
                             .foregroundStyle(row.color)
@@ -347,6 +347,41 @@ struct DiffView: View {
     /// Each line and its colour. The `---`/`+++` file headers come before the first
     /// hunk; inside one, a removed "-- comment" or an added "++i" is a real change, and
     /// colouring by prefix alone showed those as unchanged.
+    /// The words that changed, marked: for a run of removed lines followed by as many
+    /// added ones, what differs between each pair after their shared start and end.
+    static func highlighted(_ rows: [(text: String, color: Color)]) -> [(text: AttributedString, color: Color)] {
+        var out = rows.map { (text: AttributedString($0.text), color: $0.color) }
+        var i = 0
+        while i < rows.count {
+            guard rows[i].color == .red else { i += 1; continue }
+            var d = i; while d < rows.count, rows[d].color == .red { d += 1 }
+            var a = d; while a < rows.count, rows[a].color == .green { a += 1 }
+            if a - d == d - i, d - i <= 12 {
+                for k in 0..<(d - i) {
+                    let o = Array(rows[i + k].text), n = Array(rows[d + k].text)
+                    guard o.count <= 400, n.count <= 400, o.count > 1, n.count > 1 else { continue }
+                    var p = 1                                    // after the +/- sign
+                    while p < o.count, p < n.count, o[p] == n[p] { p += 1 }
+                    var q = 0
+                    while q < o.count - p, q < n.count - p, o[o.count - 1 - q] == n[n.count - 1 - q] { q += 1 }
+                    if p < o.count - q { out[i + k].text = mark(o, p, o.count - q, .red) }
+                    if p < n.count - q { out[d + k].text = mark(n, p, n.count - q, .green) }
+                }
+            }
+            i = max(a, i + 1)
+        }
+        return out
+    }
+
+    private static func mark(_ chars: [Character], _ from: Int, _ to: Int, _ tint: Color) -> AttributedString {
+        var head = AttributedString(String(chars[..<from]))
+        var mid = AttributedString(String(chars[from..<to]))
+        mid.backgroundColor = tint.opacity(0.28)
+        head.append(mid)
+        head.append(AttributedString(String(chars[to...])))
+        return head
+    }
+
     static func lines(_ diff: String) -> [(text: String, color: Color)] {
         var inHunk = false
         return diff.split(separator: "\n", omittingEmptySubsequences: false).prefix(400).map { l in

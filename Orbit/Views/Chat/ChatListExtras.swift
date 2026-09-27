@@ -181,8 +181,25 @@ struct ChatPagingRow: View {
 /// A chat's state at a glance: waiting for you, answering, queued, new, scheduled.
 struct ChatStatusBadge: View {
     let status: ChatRowStatus
+    /// When the answer started (answering), so it can count up live.
+    var since: Double? = nil
+    /// The chat's goal status, if it has one.
+    var goal: String? = nil
 
     var body: some View {
+        HStack(spacing: 6) {
+            state
+            if let goal, goal != "complete" {
+                Label(goal == "active" ? "goal" : "goal " + (goal == "blocked" ? "needs you" : goal),
+                      systemImage: "scope")
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(goal == "active" ? Color.accentColor : .orange)
+                    .labelStyle(.titleAndIcon)
+            }
+        }
+    }
+
+    @ViewBuilder private var state: some View {
         switch status {
         case .none:
             EmptyView()
@@ -191,7 +208,15 @@ struct ChatStatusBadge: View {
         case .answering:
             HStack(spacing: 4) {
                 ProgressView().controlSize(.mini)
-                Text("answering").font(.caption2.weight(.medium)).foregroundStyle(.tint)
+                if let since {
+                    // counting up, once a second, without redrawing the list
+                    TimelineView(.periodic(from: .now, by: 1)) { ctx in
+                        Text("answering · " + Self.elapsed(ctx.date.timeIntervalSince1970 - since))
+                            .font(.caption2.weight(.medium).monospacedDigit()).foregroundStyle(.tint)
+                    }
+                } else {
+                    Text("answering").font(.caption2.weight(.medium)).foregroundStyle(.tint)
+                }
             }
         case .queued:
             badge("tray.full", status.label!, .purple)
@@ -204,6 +229,13 @@ struct ChatStatusBadge: View {
         case .scheduled:
             badge("clock", status.label!, .secondary)
         }
+    }
+
+    static func elapsed(_ secs: Double) -> String {
+        let s = max(0, Int(secs))
+        if s < 60 { return "\(s)s" }
+        if s < 3600 { return "\(s / 60)m \(String(format: "%02d", s % 60))s" }
+        return "\(s / 3600)h \(s % 3600 / 60)m"
     }
 
     private func badge(_ icon: String, _ text: String, _ tint: Color) -> some View {
