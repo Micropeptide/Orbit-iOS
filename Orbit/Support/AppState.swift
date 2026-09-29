@@ -30,6 +30,8 @@ final class AppState: ObservableObject {
     @Published var runningChats: Set<String> = []
     /// When each answering chat started, so the list can count the time as it runs.
     @Published var runningSince: [String: Double] = [:]
+    /// Chats waiting on another chat's answer: id -> that chat's title.
+    @Published var talking: [String: String] = [:]
     /// The open chat's goal (Goal.swift), and whether its editor is showing.
     @Published var goal: Goal?
     @Published var goalOffer: GoalOffer?

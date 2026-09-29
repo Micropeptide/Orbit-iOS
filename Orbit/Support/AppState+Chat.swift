@@ -246,6 +246,7 @@ extension AppState {
             noteRunningState(running: r.running, waiting: r.waiting)
             runningChats = r.running
             if runningSince != r.since { runningSince = r.since }
+            if talking != r.talking { talking = r.talking }
             chatExtras.waiting = r.waiting
         }
     }

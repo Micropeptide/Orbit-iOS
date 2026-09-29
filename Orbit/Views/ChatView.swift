@@ -694,6 +694,7 @@ struct ChatView: View {
                 .accessibilityHint("Scrolls to the newest message")
             }
             ParentLine(sid: sid)
+            LinksStrip(sid: sid)
             GoalStrip(sid: sid)
             TodoDock(sid: sid)
             GitDock(sid: sid)

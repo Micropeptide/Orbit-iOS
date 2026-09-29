@@ -229,3 +229,67 @@ struct ParentLine: View {
         }
     }
 }
+
+
+/// The chats this one talks to: which, what each is doing, and whom it waits on now.
+/// Kept fresh while any of them is at work; it also picks up a goal the chat set itself.
+struct LinksStrip: View {
+    let sid: String
+    @EnvironmentObject var state: AppState
+    @State private var links: [ChatLink] = []
+    @State private var talkingTo: String?
+    @State private var open = false
+
+    var body: some View {
+        Group {
+            if !links.isEmpty || talkingTo != nil {
+                VStack(alignment: .leading, spacing: 4) {
+                    Button { withAnimation(.easeInOut(duration: 0.15)) { open.toggle() } } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: "arrow.left.arrow.right").font(.caption2)
+                            Text(talkingTo.map { "Waiting for “\($0)”" } ?? "Talks with \(links.count) chat\(links.count == 1 ? "" : "s")")
+                                .lineLimit(1)
+                            Spacer(minLength: 4)
+                            Image(systemName: open ? "chevron.down" : "chevron.up").font(.caption2).foregroundStyle(.tertiary)
+                        }
+                        .font(.caption).contentShape(.rect)
+                    }
+                    .buttonStyle(.plain)
+                    if open {
+                        ForEach(links) { l in
+                            HStack(spacing: 6) {
+                                Text(l.role).font(.caption2).foregroundStyle(.secondary).frame(minWidth: 56, alignment: .leading)
+                                if let url = URL(string: "orbit://chat/" + l.sid) {
+                                    Link(l.title, destination: url).font(.caption2.weight(.semibold)).lineLimit(1)
+                                }
+                                Spacer(minLength: 4)
+                                Text([l.state, l.goal.map { $0 == "complete" ? "goal done" : "goal: " + $0 } ?? ""]
+                                        .filter { !$0.isEmpty }.joined(separator: " · "))
+                                    .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, 14).padding(.vertical, 6)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .overlay(Divider(), alignment: .top)
+            }
+        }
+        .task(id: sid) {
+            // every few seconds while it, or a chat it talks to, is at work
+            while !Task.isCancelled {
+                await load()
+                let busy = state.streaming || talkingTo != nil || links.contains { !$0.state.isEmpty }
+                    || state.goal?.status == "active"
+                try? await Task.sleep(for: .seconds(busy ? 4 : 20))
+            }
+        }
+    }
+
+    private func load() async {
+        guard let server = state.server, state.openChat?.sid == sid,
+              let r = try? await server.links(sid) else { return }
+        links = r.links; talkingTo = r.talkingTo
+        if state.openChat?.sid == sid, r.goal != state.goal { state.goal = r.goal }
+    }
+}

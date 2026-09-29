@@ -67,10 +67,14 @@ extension OrbitServer {
     }
 
     /// Answering chats, and those waiting on you (an approval or a question).
-    func runningState() async throws -> (running: Set<String>, waiting: Set<String>, since: [String: Double]) {
-        struct R: Codable { var running: [String]?; var waiting: [String]?; var since: [String: Double]? }
+    func runningState() async throws -> (running: Set<String>, waiting: Set<String>, since: [String: Double],
+                                         talking: [String: String]) {
+        struct R: Codable { var running: [String]?; var waiting: [String]?; var since: [String: Double]?
+                            var talking: [String: [String: String]]? }
         let r = try await get("/api/running", as: R.self)
-        return (Set(r.running ?? []), Set(r.waiting ?? []), r.since ?? [:])
+        // chat id -> the title of the chat it is waiting on
+        let talking = (r.talking ?? [:]).compactMapValues { $0["title"] ?? $0["sid"] }
+        return (Set(r.running ?? []), Set(r.waiting ?? []), r.since ?? [:], talking)
     }
 
     /// The live buffer with any open question or approval in it, so a chat
