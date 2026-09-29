@@ -36,6 +36,13 @@ struct MessageBubble: View {
                         .clipShape(.rect(cornerRadius: 13))
                 }
             }
+            // sent by another chat: which, and a way over to it
+            if let from = message.from_chat, let fsid = from["sid"], let url = URL(string: "orbit://chat/" + fsid) {
+                Link(destination: url) {
+                    Label("from " + (from["title"] ?? "another chat"), systemImage: "arrowshape.turn.up.right")
+                        .font(.caption2.weight(.semibold))
+                }
+            }
             HStack {
                 Spacer(minLength: 40)
                 Text(message.text)

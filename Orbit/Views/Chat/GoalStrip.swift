@@ -208,3 +208,24 @@ struct GoalEditor: View {
         dismiss()
     }
 }
+
+
+/// In a chat another chat started: which one, and a way back to it.
+struct ParentLine: View {
+    let sid: String
+    @EnvironmentObject var state: AppState
+
+    var body: some View {
+        if state.openChat?.sid == sid, let p = state.openChat?.parent, let psid = p["sid"],
+           let url = URL(string: "orbit://chat/" + psid) {
+            HStack(spacing: 5) {
+                Image(systemName: "arrow.turn.down.right").font(.caption2)
+                Text("Started by").font(.caption2).foregroundStyle(.secondary)
+                Link(p["title"] ?? "another chat", destination: url).font(.caption2.weight(.semibold))
+                Spacer()
+            }
+            .padding(.horizontal, 14).padding(.vertical, 4)
+            .overlay(Divider(), alignment: .top)
+        }
+    }
+}
