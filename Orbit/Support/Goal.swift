@@ -5,7 +5,7 @@ import UserNotifications
 /// answer it checks the work against the objective and carries on, or stops and says
 /// why (done, stuck, over budget, out of turns, stopped by you). The phone shows where
 /// it stands and offers the same controls as the Mac.
-struct Goal: Codable, Hashable {
+struct Goal: Codable, Hashable, Equatable {
     var objective: String
     var status: String            // active | paused | blocked | budget | complete
     var token_budget: Int
@@ -209,5 +209,35 @@ extension AppState {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty else { showGoalEditor = true; return }
         await send(t, goal: true)
+    }
+}
+
+
+/// A chat this one started, messaged, or works for, with what it is doing now.
+struct ChatLink: Identifiable, Hashable {
+    var sid: String
+    var title: String
+    var role: String
+    var state: String
+    var goal: String?
+    var id: String { sid }
+
+    init?(_ d: [String: Any]) {
+        guard let sid = d["sid"] as? String else { return nil }
+        self.sid = sid
+        title = (d["title"] as? String) ?? sid
+        role = (d["role"] as? String) ?? ""
+        state = (d["state"] as? String) ?? ""
+        goal = d["goal"] as? String
+    }
+}
+
+extension OrbitServer {
+    /// `/api/links`: the chats a chat talks to, whom it waits on now, and its goal.
+    func links(_ sid: String) async throws -> (links: [ChatLink], talkingTo: String?, goal: Goal?) {
+        let obj = try await getJSON("/api/links?sid=\(Self.escaped(sid))") as? [String: Any] ?? [:]
+        let links = ((obj["links"] as? [[String: Any]]) ?? []).compactMap(ChatLink.init)
+        let talking = (obj["talking_to"] as? [String: Any])?["title"] as? String
+        return (links, talking, Goal(obj["goal"] as? [String: Any]))
     }
 }

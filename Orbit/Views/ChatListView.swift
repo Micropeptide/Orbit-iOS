@@ -338,7 +338,8 @@ struct ChatListView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 ChatStatusBadge(status: state.status(of: chat, seen: listModel.seen),
-                                since: state.runningSince[chat.id], goal: chat.goal)
+                                since: state.runningSince[chat.id], goal: chat.goal,
+                                talkingTo: state.talking[chat.id])
                 if let tags = chat.tags, !tags.isEmpty {
                     HStack(spacing: 4) {
                         ForEach(tags.prefix(3), id: \.self) { t in

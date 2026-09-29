@@ -185,10 +185,17 @@ struct ChatStatusBadge: View {
     var since: Double? = nil
     /// The chat's goal status, if it has one.
     var goal: String? = nil
+    /// Waiting on another chat's answer: that chat's title.
+    var talkingTo: String? = nil
 
     var body: some View {
         HStack(spacing: 6) {
-            state
+            if let talkingTo {
+                Label("waiting for “\(talkingTo)”", systemImage: "arrow.left.arrow.right")
+                    .font(.caption2.weight(.medium)).foregroundStyle(.tint).lineLimit(1)
+            } else {
+                state
+            }
             if let goal, goal != "complete" {
                 Label(goal == "active" ? "goal" : "goal " + (goal == "blocked" ? "needs you" : goal),
                       systemImage: "scope")
