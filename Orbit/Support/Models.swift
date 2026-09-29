@@ -37,6 +37,8 @@ struct ChatSummary: Identifiable, Codable, Hashable {
     var unread: Bool?
     /// The status of its goal, if it has one ("active", "paused", "blocked", …).
     var goal: String?
+    /// The chat that started this one (chat_create), by id and title.
+    var parent: [String: String]?
 
     var displayTitle: String { (title?.isEmpty == false ? title! : "New chat") }
     var date: Date { Date(timeIntervalSince1970: mtime) }
@@ -44,7 +46,7 @@ struct ChatSummary: Identifiable, Codable, Hashable {
     enum CodingKeys: String, CodingKey {
         case id, title, n, mtime, pinned, archived, project, tags
         case queued, scheduled
-        case external, source, cwd, host, model, unread, goal
+        case external, source, cwd, host, model, unread, goal, parent
     }
 
     init(from d: Decoder) throws {
@@ -66,6 +68,7 @@ struct ChatSummary: Identifiable, Codable, Hashable {
         model = try? c.decode(String.self, forKey: .model)
         unread = c.lenientBool(.unread)
         goal = c.lenientString(.goal)
+        parent = try? c.decode([String: String].self, forKey: .parent)
     }
 }
 
@@ -88,6 +91,8 @@ struct Message: Identifiable, Codable, Hashable {
     var thinking: String?
     /// A note sent while an answer was running, which it read at its next step.
     var note: Bool? = nil
+    /// Sent by another chat (chat_send): which one, by id and title.
+    var from_chat: [String: String]? = nil
     // saved with an answer: when it was written, how long it took, its tokens,
     // and the files it changed (undoable until undone)
     var t: Double? = nil
@@ -111,7 +116,7 @@ struct Message: Identifiable, Codable, Hashable {
     var isUser: Bool { role == "user" }
 
     enum CodingKeys: String, CodingKey {
-        case role, text, images, plots, tools, model, thinking, note
+        case role, text, images, plots, tools, model, thinking, note, from_chat
         case t, secs, usage, changes, changes_undone, can_redo
         case tool_runs, bang, plan, thinking_marks
     }
@@ -133,6 +138,7 @@ struct Message: Identifiable, Codable, Hashable {
         model = try? c.decode(String.self, forKey: .model)
         thinking = try? c.decode(String.self, forKey: .thinking)
         note = try? c.decode(Bool.self, forKey: .note)
+        from_chat = try? c.decode([String: String].self, forKey: .from_chat)
         t = c.lenientDouble(.t)
         secs = c.lenientDouble(.secs)
         usage = try? c.decode(TokenUsage.self, forKey: .usage)
@@ -173,9 +179,11 @@ struct ChatDetail: Codable {
     var goal: Goal?
     /// An open offer to keep going until the work is done.
     var goal_offer: GoalOffer?
+    /// The chat that started this one (chat_create), by id and title.
+    var parent: [String: String]?
 
     enum CodingKeys: String, CodingKey {
-        case sid, title, messages, n, running, context, plan_mode, prefs, easy_mode, goal, goal_offer
+        case sid, title, messages, n, running, context, plan_mode, prefs, easy_mode, goal, goal_offer, parent
     }
 
     init(sid: String, title: String? = nil, messages: [Message] = []) {
@@ -202,6 +210,7 @@ struct ChatDetail: Codable {
         easy_mode = c.lenient(Bool.self, .easy_mode)
         goal = c.lenient(Goal.self, .goal)
         goal_offer = c.lenient(GoalOffer.self, .goal_offer)
+        parent = try? c.decode([String: String].self, forKey: .parent)
     }
 }
 

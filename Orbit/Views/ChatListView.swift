@@ -329,6 +329,10 @@ struct ChatListView: View {
                         Image(systemName: "pin.fill").font(.caption2).foregroundStyle(.orange)
                     }
                     if let host = chat.host { ChatHostBadge(host: host) }
+                    if let p = chat.parent {
+                        Image(systemName: "arrow.turn.down.right").font(.caption2).foregroundStyle(.tint)
+                            .accessibilityLabel("started by " + (p["title"] ?? "another chat"))
+                    }
                 }
                 Text(relative(chat.date) + (chat.n > 0 ? " · \(chat.n) messages" : " · empty"))
                     .font(.caption)
