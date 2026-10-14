@@ -51,7 +51,8 @@ enum SettingsIndex {
         .init(title: "Bin", place: "Settings", words: "bin trash restore deleted recycle", target: .here("bin")),
         .init(title: "Offline copy", place: "Settings", words: "offline cache clear", target: .here("offline")),
         .init(title: "Unpair this phone", place: "Settings", words: "unpair pairing token forget", target: .here("unpair")),
-        .init(title: "About Orbit", place: "Settings", words: "about version licence license", target: .here("about")),
+        .init(title: "User guide", place: "Settings", words: "help guide how to manual instructions", target: .here("about")),
+        .init(title: "About Orbit", place: "Settings", words: "about version licence license author runtian", target: .here("about")),
     ]
 }
 

@@ -169,16 +169,21 @@ struct SettingsView: View {
 
                 Section {
                     NavigationLink {
+                        GuideView()
+                    } label: {
+                        Label("User guide", systemImage: "book")
+                    }
+                    NavigationLink {
                         AboutView()
                     } label: {
-                        LabeledContent("About Orbit", value: "by Micropeptide")
+                        LabeledContent("About Orbit", value: "by Runtian Wu")
                     }
                     LabeledContent("Version",
                                    value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—")
                 } header: {
                     Text("About")
                 } footer: {
-                    Text("Made by Micropeptide · MIT licensed")
+                    Text("Made by Runtian Wu · MIT licensed")
                 }
                 .id("about")
               }
