@@ -18,6 +18,10 @@ struct ChatView: View {
     /// True while a scroll you started is still in flight, so a layout change cannot be
     /// mistaken for you scrolling back to the bottom.
     @State private var userScrolling = false
+    /// Which way your last scroll went. Only coming DOWN to the end starts following again:
+    /// "your finger is on it and the end is near" also held for a small scroll up, which
+    /// switched following straight back on and jumped to the newest line.
+    @State private var scrolledDown = false
     @State private var scrollToken = UUID()
     /// What the transcript has measured of itself: how tall the scroll view is, and how
     /// tall each row is for the turn rail's bars. Neither is read from the body, so both
@@ -253,6 +257,7 @@ struct ChatView: View {
             .defaultScrollAnchor(opensAtHome ? .top : .bottom)
             .scrollDismissesKeyboard(.interactively)
             .apply { followingNewest($0, proxy: proxy) }
+            .apply { scrollIntent($0) }
             .onChange(of: actionsModel.jumpRequest) { _, i in
                 guard let i else { return }
                 jumpTo = i
@@ -403,7 +408,7 @@ struct ChatView: View {
         // row opening, a thinking block expanding and the todo dock appearing all move this
         // marker into range without your touching anything — and the next token then yanked
         // you down mid-sentence. Your own drag ending near the bottom says it.
-        if near && userScrolling { following = true }
+        if near && userScrolling && scrolledDown { following = true }
     }
 
     /// Shown in the transcript where the answer would have been, because that
@@ -429,10 +434,13 @@ struct ChatView: View {
     private func followingNewest<V: View>(_ content: V, proxy: ScrollViewProxy) -> some View {
         content
     // pulling the list down is you reading back: stop following until you come back down
-    .simultaneousGesture(DragGesture(minimumDistance: 12)
+    .simultaneousGesture(DragGesture(minimumDistance: 6)
         .onChanged { v in
             userScrolling = true
-            if v.translation.height > 16 { following = false }
+            // a few points is enough: below 16 the next token snapped the view back to the
+            // bottom under your finger, which read as the chat refusing to move
+            if v.translation.height > 4 { following = false; scrolledDown = false }
+            else if v.translation.height < -4 { scrolledDown = true }
         }
         // the flag outlives the gesture a moment: the scroll carries on after your
         // thumb leaves, and it is still your scroll that lands at the bottom
@@ -465,10 +473,37 @@ struct ChatView: View {
     }
     }
 
+    /// On iOS 18 the scroll view says itself when you are scrolling (touching, or the glide
+    /// after a flick) and where to: going up stops following at once, however small the
+    /// movement, and nothing moves the view while it is in your hands. The drag gesture
+    /// above stays for iOS 17, and as a second witness.
+    @ViewBuilder private func scrollIntent<V: View>(_ content: V) -> some View {
+        if #available(iOS 18.0, *) {
+            content
+                .onScrollPhaseChange { _, phase in
+                    if phase == .interacting || phase == .decelerating {
+                        userScrolling = true
+                    } else if phase == .idle {
+                        let token = UUID(); scrollToken = token
+                        Task { try? await Task.sleep(for: .milliseconds(250))
+                               if scrollToken == token { userScrolling = false } }
+                    }
+                }
+                .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y } action: { old, new in
+                    guard userScrolling else { return }
+                    if new < old - 2 { following = false; scrolledDown = false }
+                    else if new > old + 2 { scrolledDown = true }
+                }
+        } else {
+            content
+        }
+    }
+
     /// Keeps up with a growing answer only while you are at the bottom; otherwise marks
     /// that something new arrived below.
     private func follow(_ proxy: ScrollViewProxy, animated: Bool = true) {
-        if following { scroll(proxy, animated: animated) } else { newBelow = true }
+        // never while your finger is on it, or the view is still gliding from your flick
+        if following && !userScrolling { scroll(proxy, animated: animated) } else { newBelow = true }
     }
 
     /// Back to the newest message after the rows have been measured -- twice, because a
