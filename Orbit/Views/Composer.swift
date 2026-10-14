@@ -230,7 +230,7 @@ struct Composer: View {
             Image(systemName: queues ? "tray.and.arrow.down.fill" : "arrow.up")
                 .font(.body.weight(.bold))
                 .frame(width: 36, height: 36)
-                .background(canSend ? Color.accentColor : Color.secondary.opacity(0.35),
+                .background(canSend ? AnyShapeStyle(OrbitTheme.gradient) : AnyShapeStyle(Color.secondary.opacity(0.35)),
                             in: .circle)
                 .foregroundStyle(.white)
         }

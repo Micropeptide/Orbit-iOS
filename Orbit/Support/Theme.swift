@@ -93,3 +93,31 @@ extension View {
             .shadow(color: .black.opacity(0.07), radius: 10, y: 3)
     }
 }
+
+extension OrbitTheme {
+    /// The icon's own blue-to-violet, for the one action on a screen that matters most.
+    static let gradient = LinearGradient(
+        colors: [Color(light: 0x5287FF, dark: 0x6E94FF), Color(light: 0x2C5BF0, dark: 0x4D74F5),
+                 Color(light: 0x5A4CF0, dark: 0x7462F2)],
+        startPoint: .topLeading, endPoint: .bottomTrailing)
+}
+
+/// The main action on a screen: a capsule in the icon's gradient, white text, a little give
+/// when pressed.
+struct OrbitPrimaryButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.body.weight(.semibold))
+            .foregroundStyle(.white)
+            .frame(maxWidth: .infinity, minHeight: 50)
+            .background(OrbitTheme.gradient, in: .capsule)
+            .shadow(color: Color(light: 0x2C5BF0, dark: 0x000000).opacity(0.25), radius: 10, y: 4)
+            .scaleEffect(configuration.isPressed ? 0.97 : 1)
+            .opacity(configuration.isPressed ? 0.92 : 1)
+            .animation(.spring(duration: 0.2), value: configuration.isPressed)
+    }
+}
+
+extension ButtonStyle where Self == OrbitPrimaryButtonStyle {
+    static var orbitPrimary: OrbitPrimaryButtonStyle { OrbitPrimaryButtonStyle() }
+}

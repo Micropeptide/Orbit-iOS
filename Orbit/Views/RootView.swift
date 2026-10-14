@@ -7,11 +7,23 @@ struct RootView: View {
     @State private var showSample = false
     /// The welcome tips are shown once, after this phone first pairs.
     @AppStorage("orbit.tipsShown") private var tipsShown = false
+    /// The welcome — what Orbit is, connecting it, the guide — once, the first time the app opens.
+    @AppStorage("orbit.welcomed") private var welcomed = false
     /// One object for the life of the app, so code blocks read it without redrawing.
     @State private var blockActions = BlockActions()
 
     /// Development only: `ORBIT_TAB=scheduled|files|library|settings` opens on that tab so the
     /// simulator can be screenshotted without a finger. Compiled out of release.
+    /// Development only: `ORBIT_SKIP_WELCOME=1` keeps the welcome out of the way of scripted runs;
+    /// `ORBIT_WELCOME=1` shows it again.
+    private static var skipWelcome: Bool {
+        #if DEBUG
+        return ProcessInfo.processInfo.environment["ORBIT_SKIP_WELCOME"] == "1"
+        #else
+        return false
+        #endif
+    }
+
     private static var initialTab: String {
         #if DEBUG
         return ProcessInfo.processInfo.environment["ORBIT_TAB"] ?? "chats"
@@ -66,6 +78,9 @@ struct RootView: View {
             }
         }
         }
+        .fullScreenCover(isPresented: Binding(get: { !welcomed && !Self.skipWelcome }, set: { if !$0 { welcomed = true } })) {
+            WelcomeView { welcomed = true }
+        }
         .preferredColorScheme(Appearance.scheme(theme))
         .alert("Pair with a different Mac?", isPresented: Binding(
             get: { state.pendingPair != nil }, set: { if !$0 { state.pendingPair = nil } })) {
@@ -82,6 +97,9 @@ struct RootView: View {
         .onAppear {
             blockActions.state = state
             state.tab = Self.initialTab
+            #if DEBUG
+            if ProcessInfo.processInfo.environment["ORBIT_WELCOME"] == "1" { welcomed = false }
+            #endif
             #if DEBUG
             showSample = MarkdownSample.wanted
             #endif

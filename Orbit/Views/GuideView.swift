@@ -43,15 +43,19 @@ struct GuideView: View {
         .task { await load() }
     }
 
+    /// The Mac's copy when the phone can reach it (it is the newest), else the one that came
+    /// with the app — so the guide is there before pairing, and when the Mac is asleep.
     private func load() async {
-        guard let server = state.server else { failure = "Pair with your Mac to read the guide."; return }
-        do {
-            let data = try await server.run(try server.request("/guide.md"))
-            let text = String(decoding: data, as: UTF8.self)
-            (intro, sections) = Self.split(text)
-        } catch {
-            failure = "Could not load the guide from your Mac — \(error.localizedDescription)"
+        if let server = state.server,
+           let data = try? await server.run(try server.request("/guide.md")),
+           case let text = String(decoding: data, as: UTF8.self), text.contains("## ") {
+            (intro, sections) = Self.split(text); return
         }
+        if let url = Bundle.main.url(forResource: "guide", withExtension: "md"),
+           let text = try? String(contentsOf: url, encoding: .utf8) {
+            (intro, sections) = Self.split(text); return
+        }
+        failure = "The guide could not be loaded."
     }
 
     /// The text before the first "## " heading, and one section per heading.
