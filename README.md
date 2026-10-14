@@ -1,7 +1,29 @@
+<img src="assets/icon-512.png" width="80" align="right" alt="">
+
 # Orbit for iPhone
 
-The phone app for [Orbit](https://github.com/Micropeptide/Orbit), the research assistant that lives on your own Mac. Your chats, notes, papers and the model that answers all stay on the Mac; this app is a window onto them — live over Tailscale from anywhere, or over your local network at home.
+The phone app for [Orbit](https://github.com/Micropeptide/Orbit), your own AI workspace on
+your Mac. Orbit runs any model through the real Claude Code or Codex agent, lets chats hand
+work to each other, keeps going toward a goal, and queues or schedules messages. Your
+chats, files and the model that answers all stay on the Mac. This app is a live window onto
+them, over Tailscale from anywhere or over your local network at home.
 
+<p align="center">
+  <img src="docs/screenshots/welcome.png" width="180" alt="The welcome screen on first open">
+  <img src="docs/screenshots/chats.png" width="180" alt="The chat list, grouped by day">
+  <img src="docs/screenshots/chat.png" width="180" alt="A chat working toward a goal, with a table and a plot inline">
+  <img src="docs/screenshots/chats-talk.png" width="180" alt="A chat handing the test run to a cheaper chat and waiting for it">
+  <img src="docs/screenshots/scheduled.png" width="180" alt="Scheduled messages and tasks">
+</p>
+
+- **Chats that talk to each other, and goals.** Follow a chat as it hands work to a
+  cheaper one and waits for the answer. Messages from another chat are marked **from**
+  it, with a link to that chat. A chat with a goal shows its progress and lets you
+  pause, edit or clear the goal.
+- **Approvals from the Lock Screen.** Allow or Deny a step on the notification itself,
+  without opening the app.
+- **A guide built in.** The first time you open the app, it walks you through pairing.
+  The full user guide is under Settings.
 - **A home page on every new chat.** What needs you (an approval, a failed scheduled task, an account running low), what is running right now — stop it from there — what is scheduled next, two weeks of activity with your streak, and what is left of each account's 5-hour, weekly and monthly allowance. It keeps itself current while it is on screen.
 - **Your conversations, live.** The same chats as on the Mac, streaming as they are written, grouped by day, with Claude Code, Codex and OpenCode sessions in their own sections. Pin, archive, rename, bin, filter by project. Search titles *and* the text of every message, then jump straight to the line. Scroll up while an answer is being written and it leaves you where you are, with a "New messages" button to come back.
 - **Reads like Claude Code.** Tool calls as `⏺ Read`, `⏺ Bash` lines with a one-line result under them, runs of look-ups folded into "Read 3 files, Searched for 1 pattern", a live status line, collapsible reasoning, tables, code, math and diagrams. Approval prompts and questions from the model are answered from the phone.
@@ -10,14 +32,6 @@ The phone app for [Orbit](https://github.com/Micropeptide/Orbit), the research a
 - **Run the Mac from your pocket.** Pick the model per chat — the local MLX model, Claude Code or Codex on any provider, or a hosted API — with what is left of each account and the cheaper hours shown in the picker. Start, stop or switch the local model server. See and trigger the Mac's automatic backup. Restore from the bin.
 - **Works when the Mac is asleep.** Recent conversations are cached for reading offline; a banner says so rather than pretending. An answer that finishes while you are elsewhere notifies you, and the notification opens that chat.
 - **Private by construction.** Pairing is a QR code carrying a token that lands in the Keychain; every request is gated by it. Over Tailscale the connection is HTTPS through Tailscale Serve with a real certificate. Optional Face ID lock. Nothing goes to a cloud unless you configured a hosted model yourself.
-
-<p align="center">
-  <img src="docs/screenshots/home.png" width="190" alt="A new chat's home page: running now, coming up, activity">
-  <img src="docs/screenshots/chats.png" width="190" alt="Chat list">
-  <img src="docs/screenshots/chat.png" width="190" alt="A Claude Code chat with tool calls and a table">
-  <img src="docs/screenshots/plot.png" width="190" alt="A plot inline">
-  <img src="docs/screenshots/settings.png" width="190" alt="Settings: local model server and harness">
-</p>
 
 ## Getting it onto your phone
 
