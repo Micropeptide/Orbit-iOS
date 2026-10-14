@@ -322,9 +322,13 @@ struct PermissionModeLine: View {
                 } label: {
                     HStack(spacing: 4) {
                         Text(Self.text(mode)).foregroundStyle(Self.tint(mode))
-                        if mode != .ask { Text("· tap to cycle").foregroundStyle(.tertiary) }
+                        // always laid out, only shown: inserted, it was drawn mid-animation
+                        // at its old place, over the message box
+                        Text("· tap to cycle").foregroundStyle(.tertiary)
+                            .opacity(mode != .ask ? 1 : 0).accessibilityHidden(mode == .ask)
                         Spacer(minLength: 0)
                     }
+                    .transaction { $0.animation = nil }
                     .font(.caption2.weight(.medium))
                     .padding(.horizontal, 16).padding(.bottom, 6)
                     .contentShape(.rect)

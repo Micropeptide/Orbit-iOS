@@ -37,8 +37,8 @@ struct AboutView: View {
                 Link(destination: URL(string: "https://github.com/Micropeptide/Orbit")!) {
                     LabeledContent("Source", value: "github.com/Micropeptide/Orbit")
                 }
-                Link(destination: URL(string: "https://github.com/Micropeptide")!) {
-                    LabeledContent("More", value: "github.com/Micropeptide")
+                Link(destination: URL(string: "https://runtianwu.com")!) {
+                    LabeledContent("Website", value: "runtianwu.com")
                 }
             }
 

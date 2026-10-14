@@ -430,7 +430,7 @@ struct BangBlock: View {
                     .textSelection(.enabled)
                 if run.running {
                     HStack(spacing: 6) {
-                        ProgressView().controlSize(.mini)
+                        OrbitSpinner(size: 10, tint: OrbitTheme.tool)
                         Text("running…").font(.caption.monospaced()).foregroundStyle(.secondary)
                     }
                 } else {

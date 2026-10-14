@@ -122,7 +122,7 @@ struct ChatStatusChips: View {
             withAnimation { filter = filter == .attention ? .active : .attention }
         } label: {
             HStack(spacing: 5) {
-                if spinner { ProgressView().controlSize(.mini) }
+                if spinner { OrbitSpinner(size: 10, tint: tint) }
                 Text(text).font(.caption.weight(.medium))
             }
             .padding(.horizontal, 10).padding(.vertical, 5)
@@ -179,6 +179,33 @@ struct ChatPagingRow: View {
 }
 
 /// A chat's state at a glance: waiting for you, answering, queued, new, scheduled.
+/// At the head of a chat's row: what it is doing. A planet going round while it answers,
+/// an orange mark while it waits for you, a cobalt dot when there is news; nothing when
+/// there is nothing to say.
+struct RowMark: View {
+    let status: ChatRowStatus
+
+    var body: some View {
+        switch status {
+        case .answering:
+            OrbitSpinner(size: 13).padding(.top, 4)
+        case .waiting:
+            Image(systemName: "exclamationmark.circle.fill")
+                .font(.system(size: 15)).foregroundStyle(OrbitTheme.waiting).padding(.top, 2)
+                .accessibilityLabel("waiting for you")
+        case .unread:
+            Circle().fill(Color.accentColor).frame(width: 9, height: 9).padding(.top, 6)
+                .accessibilityLabel("new")
+        case .queued:
+            Image(systemName: "tray.full.fill").font(.system(size: 11)).foregroundStyle(.purple).padding(.top, 4)
+        case .scheduled:
+            Image(systemName: "clock").font(.system(size: 11)).foregroundStyle(.secondary).padding(.top, 4)
+        case .none:
+            Color.clear
+        }
+    }
+}
+
 struct ChatStatusBadge: View {
     let status: ChatRowStatus
     /// When the answer started (answering), so it can count up live.
@@ -187,6 +214,8 @@ struct ChatStatusBadge: View {
     var goal: String? = nil
     /// Waiting on another chat's answer: that chat's title.
     var talkingTo: String? = nil
+    /// Off where the row's own mark already turns.
+    var spinner: Bool = true
 
     var body: some View {
         HStack(spacing: 6) {
@@ -214,7 +243,7 @@ struct ChatStatusBadge: View {
             badge("exclamationmark.circle.fill", status.label!, .orange)
         case .answering:
             HStack(spacing: 4) {
-                ProgressView().controlSize(.mini)
+                if spinner { OrbitSpinner(size: 10) }
                 if let since {
                     // counting up, once a second, without redrawing the list
                     TimelineView(.periodic(from: .now, by: 1)) { ctx in

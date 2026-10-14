@@ -109,6 +109,7 @@ struct ChatView: View {
         // that keeps the transcript's own inset correct, so text scrolls under
         // the navigation bar instead of starting behind it.
         transcript
+            .background(OrbitTheme.paper.ignoresSafeArea())
             .safeAreaInset(edge: .top, spacing: 0) {
                 VStack(spacing: 0) {
                     ConnectionBanner()
@@ -307,8 +308,7 @@ struct ChatView: View {
     @ViewBuilder private var transcriptContent: some View {
                     if state.messages.isEmpty && !state.streaming {
                         VStack(spacing: 10) {
-                            Image("OrbitMark").resizable().scaledToFit()
-                                .frame(width: 56, height: 56).opacity(0.9)
+                            OrbitMark(size: 46).padding(.bottom, 8)
                             Text(Self.greeting()).font(.title3.weight(.semibold))
                             Text("Answering with \(currentModelName)")
                                 .font(.caption2).foregroundStyle(.tertiary)
@@ -644,13 +644,13 @@ struct ChatView: View {
             VStack(alignment: .leading, spacing: 7) {
                 if state.liveSteps.isEmpty && !continues {
                     Text(state.liveModel.isEmpty ? currentModelName : state.liveModel)
-                        .font(.caption2.smallCaps())
+                        .font(.caption2.weight(.medium))
                         .foregroundStyle(.secondary)
                 }
 
                 if !state.liveStatus.isEmpty && state.liveText.isEmpty && state.liveRuns.isEmpty {
-                    HStack(spacing: 7) {
-                        ProgressView().controlSize(.mini)
+                    HStack(spacing: 8) {
+                        OrbitSpinner(size: 12)
                         Text(state.liveStatus).font(.footnote).foregroundStyle(.secondary)
                     }
                 }
@@ -703,7 +703,18 @@ struct ChatView: View {
                      onPickModel: { showModels = true },
                      onCommand: { command($0) })
         }
-        .background(.bar)       // one bar behind the todo list, status line and box
+        // the conversation's own paper behind the docks and the floating box, fading in
+        // over the last lines of the transcript rather than cutting them off at a hard edge
+        .background(alignment: .top) {
+            VStack(spacing: 0) {
+                LinearGradient(colors: [OrbitTheme.paper.opacity(0), OrbitTheme.paper],
+                               startPoint: .top, endPoint: .bottom)
+                    .frame(height: 22)
+                OrbitTheme.paper
+            }
+            .padding(.top, -22)
+            .ignoresSafeArea(edges: .bottom)
+        }
     }
 }
 
