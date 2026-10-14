@@ -83,15 +83,13 @@ struct OrbitMark: View {
 }
 
 extension View {
-    /// The floating surface the composer and cards sit on: Liquid Glass where the system
-    /// has it, a quiet card with a hairline otherwise.
-    @ViewBuilder func orbitSurface(cornerRadius: CGFloat = 22) -> some View {
-        if #available(iOS 26.0, *) {
-            self.glassEffect(.regular.interactive(), in: .rect(cornerRadius: cornerRadius))
-        } else {
-            self.background(OrbitTheme.surface, in: .rect(cornerRadius: cornerRadius))
-                .overlay(RoundedRectangle(cornerRadius: cornerRadius).strokeBorder(OrbitTheme.line, lineWidth: 0.75))
-                .shadow(color: .black.opacity(0.08), radius: 12, y: 4)
-        }
+    /// The floating surface the composer and cards sit on: a quiet card with a hairline and a
+    /// soft shadow. Not Liquid Glass: glass is drawn on a layer of its own that animates
+    /// separately, and while a chat opened (the tab bar hiding) the box slid away from the
+    /// lines laid out under it, which were left drawn across it.
+    func orbitSurface(cornerRadius: CGFloat = 22) -> some View {
+        self.background(OrbitTheme.surface, in: .rect(cornerRadius: cornerRadius))
+            .overlay(RoundedRectangle(cornerRadius: cornerRadius).strokeBorder(OrbitTheme.line, lineWidth: 0.75))
+            .shadow(color: .black.opacity(0.07), radius: 10, y: 3)
     }
 }

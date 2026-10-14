@@ -310,8 +310,11 @@ struct PermissionModeLine: View {
     }
 
     var body: some View {
+        // Always laid out, so it moves with the box above it. Put in only once the chat's
+        // id arrived, it was inserted mid-way through the chat opening and slid into place
+        // on its own, across the box.
         Group {
-            if sid != nil {
+            VStack(spacing: 0) {
                 Button {
                     guard !busy else { return }
                     busy = true
@@ -328,13 +331,12 @@ struct PermissionModeLine: View {
                             .opacity(mode != .ask ? 1 : 0).accessibilityHidden(mode == .ask)
                         Spacer(minLength: 0)
                     }
-                    .transaction { $0.animation = nil }
                     .font(.caption2.weight(.medium))
                     .padding(.horizontal, 16).padding(.bottom, 6)
                     .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
-                .disabled(busy)
+                .disabled(busy || sid == nil)
                 .accessibilityLabel("Permission mode: \(mode.label)")
                 .accessibilityHint("Changes to the next mode")
             }
