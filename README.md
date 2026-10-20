@@ -14,12 +14,22 @@ them, over Tailscale from anywhere or over your local network at home.
   <img src="docs/screenshots/chat.png" width="180" alt="A chat working toward a goal, with a table and a plot inline">
   <img src="docs/screenshots/chats-talk.png" width="180" alt="A chat handing the test run to a cheaper chat and waiting for it">
   <img src="docs/screenshots/scheduled.png" width="180" alt="Scheduled messages and tasks">
+  <img src="docs/screenshots/accounts.png" width="180" alt="Claude accounts: one is used up, the other takes over">
+  <img src="docs/screenshots/looks.png" width="180" alt="A chat where the agent opened the page it built and shows the screenshot">
 </p>
 
 - **Chats that talk to each other, and goals.** Follow a chat as it hands work to a
   cheaper one and waits for the answer. Messages from another chat are marked **from**
   it, with a link to that chat. A chat with a goal shows its progress and lets you
   pause, edit or clear the goal.
+- **Several accounts.** Add a second Claude account (and several OpenCode Go accounts) in Settings,
+  choose which is main, and let Orbit move to the next by itself when one hits its limit, and back
+  once it has reset. A chat can be pinned to an account from its model sheet. The chat says which
+  account took over.
+- **Sees what it builds.** When an agent on the Mac opens the page or app it built, takes a screenshot
+  and checks it, the screenshot is in the chat, inline.
+- **Other agents' chats, in view.** The *From Claude Code / Codex / OpenCode* sections show how long ago
+  their newest chat moved and open by themselves while one is active.
 - **Approvals from the Lock Screen.** Allow or Deny a step on the notification itself,
   without opening the app.
 - **A guide built in.** The first time you open the app, it walks you through pairing.
