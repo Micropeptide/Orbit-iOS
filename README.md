@@ -6,7 +6,8 @@ The phone app for [Orbit](https://github.com/Micropeptide/Orbit), your own AI wo
 your Mac. Orbit runs any model through the real Claude Code or Codex agent, lets chats hand
 work to each other, keeps going toward a goal, and queues or schedules messages. Your
 chats, files and the model that answers all stay on the Mac. This app is a live window onto
-them, over Tailscale from anywhere or over your local network at home.
+them, from any network with no VPN (through your own Cloudflare Tunnel), over Tailscale, or over
+your Wi-Fi at home. It also carries the Mac's cluster, Crew, helper and shared-project screens.
 
 <p align="center">
   <img src="docs/screenshots/welcome.png" width="180" alt="The welcome screen on first open">
@@ -40,9 +41,14 @@ them, over Tailscale from anywhere or over your local network at home.
 - **A queue, not interruptions.** Send while a chat is answering and the message waits its turn on the Mac, then goes by itself. Reorder, edit, pause or clear the queue — or hold Send to slip a note into the running answer, which the model picks up at its next step. Schedule a message for later; see `/tasks`, scheduled tasks and cluster jobs.
 - **Send what you are looking at.** Photos from the library, a picture from the camera, or any file from the Files app — uploaded to the Mac and sent with your message; `@` mentions a file already there. Plots and pictures render inline; files an answer wrote are cards under it.
 - **Run the Mac from your pocket.** Pick the model per chat — the local MLX model, Claude Code or Codex on any provider, or a hosted API — with what is left of each account and the cheaper hours shown in the picker. Start, stop or switch the local model server. See and trigger the Mac's automatic backup. Restore from the bin.
+- **Reach your Mac from any network.** Choose *Internet (no Tailscale)* on the Mac and scan the QR: the app talks to a name on your own domain through a Cloudflare Tunnel guarded by Cloudflare Access, so no VPN app is needed and nothing is open on your router. The app sends its own Access key with every request and hands Cloudflare's cookie to its web views, so shared-project pages and file previews open too.
+- **Pairing that says what went wrong.** "Pairing with your Mac…", then the real reason (a used or expired code, an address that did not answer, Access refusing) in red on the pairing screen instead of a message that vanishes. Open an `orbit://pair` link from the Mac if scanning does not work.
+- **Cluster.** Your running and queued jobs, disk, free GPUs by model and recent errors, plus the cluster models Orbit runs for you (start, stop, measure, save) and the one chats use.
+- **Crew.** Start, watch, pause and stop a builder-and-reviewer run, with each round's score and what the reviewer asked for next.
+- **Helpers.** Choose which agents (Claude Code, Claude Science, Codex) may use Orbit, what they may do (nothing, or ask you each time) and their limits, and answer their requests from the phone.
 - **Shared projects.** If you work on a project with other people on the Mac, a Shared tab (and a folded section in the chat list) opens it full screen — the same page your collaborators use — with downloads going to the share sheet, uploads through the page, who is here, and a count of what is new since you last looked. "Add to a shared project…" in a chat's menu shows what would be copied, and warns when it looks like it holds a secret, before anything is shared.
 - **Works when the Mac is asleep.** Recent conversations are cached for reading offline; a banner says so rather than pretending. An answer that finishes while you are elsewhere notifies you, and the notification opens that chat.
-- **Private by construction.** Pairing is a QR code carrying a token that lands in the Keychain; every request is gated by it. Over Tailscale the connection is HTTPS through Tailscale Serve with a real certificate. Optional Face ID lock. Nothing goes to a cloud unless you configured a hosted model yourself.
+- **Private by construction.** Pairing is a QR code carrying a token that lands in the Keychain; every request is gated by it. Over Tailscale the connection is HTTPS through Tailscale Serve with a real certificate; over the internet door Cloudflare Access stops everything but your phone before it reaches the Mac, and the Mac checks that again. Optional Face ID lock. Nothing goes to a cloud unless you configured a hosted model yourself.
 
 ## Getting it onto your phone
 
@@ -54,13 +60,15 @@ There is no App Store listing — Orbit talks to *your* Mac, and Apple's review 
 | **Build from source** | `xcodegen generate && open Orbit.xcodeproj`, choose your team under *Signing & Capabilities*, run on your phone. Needs Xcode 16+ and [XcodeGen](https://github.com/yonaskolb/XcodeGen). | same as above |
 | **From the Mac running Orbit** | `bin/orbit-phone-install` in the main repo builds, signs for your paired phone and installs over USB or Wi-Fi; a nightly LaunchAgent keeps a free-ID signature alive. | indefinitely, while the phone is reachable |
 
+Internet mode, the cluster, Crew and helper screens and the shared-project host controls need the build in this repository (version 1.2, build 9 or later); if the release IPA is older, build from source or use the Mac installer above.
+
 The IPA in the release is **unsigned** — it carries no certificate and no profile, which is exactly why you can sign it with your own account.
 
 The first time, iOS asks you to trust the developer certificate under *Settings → General → VPN & Device Management*.
 
 ## Pairing
 
-1. On the Mac: Orbit → **Settings → Phone** → choose **Tailscale** (works anywhere; the phone needs the Tailscale app connected to the same tailnet) or **Local network** (same Wi-Fi) → restart Orbit.
+1. On the Mac: Orbit → **Settings → Phone** → choose **Internet (no Tailscale)** (works on any network; needs the one-time tunnel setup in the main repo's [internet door guide](https://github.com/Micropeptide/Orbit/blob/main/docs/INTERNET_DOOR.md)), **Tailscale** (works anywhere; the phone needs the Tailscale app connected to the same tailnet) or **Local network** (same Wi-Fi) → Save and restart the server.
 2. On the phone: open Orbit → **Scan the QR code** the Mac shows.
 
 That is the whole setup. The QR carries the address, fallback addresses and a pairing token; the app tries the alternatives by itself and keeps learning new ones from the Mac, so you scan once. **Rotate token** on the Mac unpairs every device at once.
